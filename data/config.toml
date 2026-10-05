@@ -1,0 +1,19 @@
+[paths]
+# Minden útvonal a data/ mappához képest relatív
+manifest = "manifests/datasets.json"
+downloads = "downloads"
+raw = "raw"
+processed = "processed"
+reports = "reports"
+
+[collect]
+# Alapértelmezetten letöltendő adathalmazok
+datasets = ["sunrgbd", "nyu_depth_v2"]
+# A 428 GB-os nyers NYU csak külön kérésre
+include_raw_nyu = false
+# Ennyi szabad hely kell a letöltés megkezdéséhez (GB)
+min_free_space_gb = 40
+# Letöltési beállítások
+chunk_size_mb = 8
+timeout_s = 60
+retries = 3

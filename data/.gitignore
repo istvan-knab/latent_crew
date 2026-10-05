@@ -1,0 +1,10 @@
+# Nagy adatfájlok: ezek sosem kerülhetnek Gitbe
+downloads/
+raw/
+processed/
+
+# Félbehagyott letöltések ideiglenes fájljai
+*.part
+
+# A Python automatikusan generált gyorsítótára
+__pycache__/
