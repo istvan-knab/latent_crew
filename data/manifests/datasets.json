@@ -1,0 +1,59 @@
+{
+  "sunrgbd": {
+    "name": "SUN RGB-D",
+    "version": "V1",
+    "files": [
+      {
+        "id": "sunrgbd_data",
+        "url": "https://rgbd.cs.princeton.edu/data/SUNRGBD.zip",
+        "download": "sunrgbd/SUNRGBD.zip",
+        "kind": "zip",
+        "raw": "sunrgbd",
+        "size_bytes": 6885481608,
+        "sha256": null
+      },
+      {
+        "id": "sunrgbd_toolbox",
+        "url": "https://rgbd.cs.princeton.edu/data/SUNRGBDtoolbox.zip",
+        "download": "sunrgbd/SUNRGBDtoolbox.zip",
+        "kind": "zip",
+        "raw": "sunrgbd",
+        "size_bytes": 570324301,
+        "sha256": null
+      },
+      {
+        "id": "sunrgbd_meta2d",
+        "url": "https://rgbd.cs.princeton.edu/data/SUNRGBDMeta2DBB_v2.mat",
+        "download": "sunrgbd/SUNRGBDMeta2DBB_v2.mat",
+        "kind": "file",
+        "raw": "sunrgbd/metadata",
+        "size_bytes": 4300305,
+        "sha256": null
+      },
+      {
+        "id": "sunrgbd_meta3d",
+        "url": "https://rgbd.cs.princeton.edu/data/SUNRGBDMeta3DBB_v2.mat",
+        "download": "sunrgbd/SUNRGBDMeta3DBB_v2.mat",
+        "kind": "file",
+        "raw": "sunrgbd/metadata",
+        "size_bytes": 9873056,
+        "sha256": null
+      }
+    ]
+  },
+  "nyu_depth_v2": {
+    "name": "NYU Depth V2",
+    "version": "labeled",
+    "files": [
+      {
+        "id": "nyu_labeled",
+        "url": "https://horatio.cs.nyu.edu/mit/silberman/nyu_depth_v2/nyu_depth_v2_labeled.mat",
+        "download": "nyu_depth_v2/nyu_depth_v2_labeled.mat",
+        "kind": "file",
+        "raw": "nyu_depth_v2",
+        "size_bytes": 2972037809,
+        "sha256": null
+      }
+    ]
+  }
+}
