@@ -7,7 +7,8 @@ import requests
 from tqdm import tqdm
 
 from .config import load_config
-from .utils import get_logger
+from .utils import get_logger, sha256_of
+from .validators import ValidationError, check_mat, check_size, check_zip
 
 log = get_logger(__name__)
 
@@ -46,12 +47,8 @@ class DataCollector:
             done = part.stat().st_size if part.exists() else 0
             headers = {"Range": f"bytes={done}-"} if done else {}
             try:
-                with requests.get(
-                    url,
-                    headers=headers,
-                    stream=True,
-                    timeout=self.cfg.timeout_s,
-                ) as r:
+                with requests.get(url, headers=headers, stream=True,
+                                timeout=self.cfg.timeout_s) as r:
                     if r.status_code == 416:
                         # 416 = "nincs több adat": a .part már teljes
                         break
@@ -63,12 +60,8 @@ class DataCollector:
                     total = done + int(r.headers.get("Content-Length", 0))
                     mode = "ab" if done else "wb"
                     with open(part, mode) as f, tqdm(
-                        total=total,
-                        initial=done,
-                        unit="B",
-                        unit_scale=True,
-                        unit_divisor=1024,
-                        desc=target.name,
+                        total=total, initial=done, unit="B", unit_scale=True,
+                        unit_divisor=1024, desc=target.name,
                     ) as bar:
                         for data in r.iter_content(chunk_size=chunk_size):
                             f.write(data)
@@ -87,8 +80,27 @@ class DataCollector:
         return target
 
     def verify_download(self, target: Path, spec: dict) -> None:
-        raise NotImplementedError
+        """Ellenőrzi a letöltött fájl méretét, hash-ét és olvashatóságát."""
+        target = Path(target)
+        if not target.exists():
+            raise ValidationError(f"Hiányzó fájl: {target}")
 
+        check_size(target, spec["size_bytes"])
+
+        # A hash-számolás egy 7 GB-os fájlnál percekig tart, de csak így biztos
+        digest = sha256_of(target)
+        if spec.get("sha256") is None:
+            log.info("%s SHA-256: %s (még nincs a manifestben)", target.name, digest)
+        elif digest != spec["sha256"]:
+            raise ValidationError(f"{target.name}: hibás SHA-256 hash")
+
+        if spec["kind"] == "zip":
+            check_zip(target)
+        elif target.suffix == ".mat":
+            check_mat(target)
+
+        log.info("Rendben: %s", target.name)
+        
     def extract_archive(self, archive: Path, destination: Path) -> None:
         raise NotImplementedError
 
