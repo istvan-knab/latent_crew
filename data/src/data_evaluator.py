@@ -10,11 +10,13 @@ from pathlib import Path
 
 import numpy as np
 import PIL
+import scipy.io
 from PIL import Image
 from tqdm import tqdm
 
 from .config import load_config
 from .data_collector import PATH_KEYS
+from .extractors import sun_key
 from .utils import get_logger, human_size
 from .validators import ValidationError
 
@@ -34,6 +36,10 @@ DEPTH_NEAR_MM = 100     # closer than 0.1 m is physically implausible for these 
 DEPTH_FAR_MM = 10000    # beyond 10 m is outside the indoor sensor range
 DEPTH_MIN_VALID = 0.5   # flag samples whose raw depth has fewer measured pixels than this
 DEPTH_DIFF_MM = 10      # raw vs. filled differences above this count as changed
+# A class is rare below this share of labelled pixels or in fewer images than this
+RARE_PIXEL_RATIO = 0.001
+RARE_IMAGES = 10
+TOP_CLASSES = 10
 # Sample ids listed per issue in the report (all of them go to self.problems)
 EXAMPLES = 10
 
@@ -385,7 +391,168 @@ class DataEvaluator:
         return result
 
     def evaluate_labels(self, dataset: str) -> dict:
-        return {}  # TODO
+        """Class and instance statistics, background ratio, rare classes and boxes."""
+        start = time.perf_counter()
+        out = self.cfg.processed / dataset
+        rows = self._subset(self._load_index(dataset))
+        classes = json.loads((out / "classes.json").read_text(encoding="utf-8"))
+        n_cls = len(classes)
+
+        pixels = np.zeros(n_cls, np.int64)      # pixels per class
+        images = np.zeros(n_cls, np.int64)      # images containing the class
+        instances = np.zeros(n_cls, np.int64)   # objects per class
+        per_image = {"classes": [], "instances": [], "background_ratio": []}
+        sizes = {}  # source folder -> (H, W), for the box checks
+        flagged = {k: [] for k in ("unreadable", "bad_format", "bad_values", "unlabeled",
+                                   "bad_box_2d", "bad_box_3d")}
+
+        def flag(kind: str, sample_id: str, message: str) -> None:
+            flagged[kind].append(sample_id)
+            self._problem(dataset, sample_id, "labels", message)
+
+        for r in tqdm(rows, desc=f"Labels {dataset}", unit="sample"):
+            maps = {}
+            for k in ("semantic", "instance"):
+                try:
+                    with Image.open(out / r[k]) as img:
+                        maps[k] = np.asarray(img)
+                except OSError as e:
+                    flag("unreadable", r["id"], f"unreadable {k}: {e}")
+            sem, inst = maps.get("semantic"), maps.get("instance")
+            if sem is None:
+                continue
+            if sem.ndim != 2 or sem.dtype.kind != "u":
+                flag("bad_format", r["id"], f"semantic: {sem.dtype} {sem.shape}")
+                continue
+            if sem.max() >= n_cls:
+                flag("bad_values", r["id"], f"label {sem.max()} >= {n_cls} classes")
+                continue
+
+            counts = np.bincount(sem.ravel(), minlength=n_cls)
+            pixels += counts
+            present = counts > 0
+            images += present
+            per_image["classes"].append(int(present[1:].sum()))
+            per_image["background_ratio"].append(counts[0] / sem.size)
+            if counts[0] == sem.size:
+                flag("unlabeled", r["id"], "no labelled pixels")
+            if "source" in r:
+                sizes[r["source"]] = sem.shape
+
+            # An object is one (class, instance id) pair; 0 means none in both maps
+            if inst is not None and inst.shape == sem.shape:
+                mask = (sem > 0) & (inst > 0)
+                pairs = np.unique(sem[mask].astype(np.int64) * 65536 + inst[mask])
+                instances += np.bincount(pairs // 65536, minlength=n_cls)
+                per_image["instances"].append(len(pairs))
+
+        labelled = int(pixels[1:].sum())
+        total = int(pixels.sum())
+        per_class = [
+            {"id": k, "name": classes[k], "pixels": int(pixels[k]),
+             "labelled_ratio": round(int(pixels[k]) / labelled, 6) if labelled else None,
+             "images": int(images[k]), "instances": int(instances[k])}
+            for k in range(1, n_cls)
+        ]
+        seen = [c for c in per_class if c["images"] > 0]
+        rare = [c["name"] for c in seen
+                if c["labelled_ratio"] < RARE_PIXEL_RATIO or c["images"] < RARE_IMAGES]
+        by_pixels = sorted(seen, key=lambda c: c["pixels"], reverse=True)
+        cum = np.cumsum([c["pixels"] for c in by_pixels]) / labelled if labelled else []
+
+        result = {
+            "checked_samples": len(rows),
+            "thresholds": {"rare_pixel_ratio": RARE_PIXEL_RATIO, "rare_images": RARE_IMAGES},
+            "num_classes": n_cls - 1,
+            "class_names": classes,
+            "background_ratio": round(int(pixels[0]) / total, 4) if total else None,
+            "per_image": {
+                "classes": _summary(per_image["classes"]),
+                "instances": _summary(per_image["instances"]),
+                "background_ratio": _summary(per_image["background_ratio"]),
+            },
+            "imbalance": {
+                "classes_seen": len(seen),
+                "classes_never_seen": [c["name"] for c in per_class if c["images"] == 0],
+                "rare_classes": rare,
+                "top_classes": [{"name": c["name"], "labelled_ratio": c["labelled_ratio"]}
+                                for c in by_pixels[:TOP_CLASSES]],
+                "max_min_pixel_ratio": round(by_pixels[0]["pixels"] / by_pixels[-1]["pixels"], 1)
+                if by_pixels else None,
+                "classes_for_90pct_pixels": int(np.searchsorted(cum, 0.9)) + 1 if labelled else None,
+            },
+            "per_class": per_class,
+        }
+        if dataset == "sunrgbd":
+            result["boxes"] = self._sun_boxes(dataset, rows, sizes, flag)
+        else:
+            result["boxes"] = "not available"
+        # Box issues are per box, so one sample can be listed several times
+        result["flagged"] = {k: {"count": len(ids), "examples": list(dict.fromkeys(ids))[:EXAMPLES]}
+                             for k, ids in flagged.items()}
+        result["runtime_s"] = round(time.perf_counter() - start, 1)
+        return result
+
+    def _sun_boxes(self, dataset: str, rows: list[dict], sizes: dict, flag) -> dict:
+        """2D and 3D bounding box statistics from the SUN metadata files."""
+        meta = self.cfg.raw / "sunrgbd" / "metadata"
+        ids = {r["source"]: r["id"] for r in rows}
+        result = {}
+        for kind, file, var, field in (
+            ("2d", "SUNRGBDMeta2DBB_v2.mat", "SUNRGBDMeta2DBB", "groundtruth2DBB"),
+            ("3d", "SUNRGBDMeta3DBB_v2.mat", "SUNRGBDMeta", "groundtruth3DBB"),
+        ):
+            log.info("Reading %s", file)
+            mat = scipy.io.loadmat(meta / file, variable_names=[var],
+                                   squeeze_me=True, struct_as_record=False)
+            per_image, names, dims, bad = [], Counter(), [], 0
+            # 2D boxes slightly past the border (a few px) are kept, only counted
+            outside, overshoot = 0, 0.0
+            for m in np.atleast_1d(mat[var]):
+                key = sun_key(m.sequenceName)
+                if key not in ids:
+                    continue
+                boxes = np.atleast_1d(getattr(m, field))
+                boxes = [b for b in boxes if hasattr(b, "classname")]
+                per_image.append(len(boxes))
+                for b in boxes:
+                    names[str(b.classname)] += 1
+                    if kind == "2d":
+                        x, y, w, h = np.asarray(b.gtBb2D, np.float64).ravel()[:4]
+                        img_h, img_w = sizes.get(key, (np.inf, np.inf))
+                        problem = not np.isfinite([x, y, w, h]).all() or w <= 0 or h <= 0
+                        if not problem:
+                            dims.append((w, h, w * h / (img_w * img_h)))
+                            past = max(-x, -y, x + w - img_w, y + h - img_h)
+                            if past > 1:
+                                outside += 1
+                                overshoot = max(overshoot, past)
+                    else:
+                        size = 2 * np.asarray(b.coeffs, np.float64).ravel()
+                        centre = np.asarray(b.centroid, np.float64).ravel()
+                        problem = (len(size) != 3 or not np.isfinite(size).all()
+                                   or (size <= 0).any() or not np.isfinite(centre).all())
+                        if not problem:
+                            dims.append(tuple(size))
+                    if problem:
+                        bad += 1
+                        flag(f"bad_box_{kind}", ids[key], f"invalid {kind.upper()} box "
+                             f"'{b.classname}'")
+            dims = np.array(dims) if dims else np.zeros((0, 3))
+            labels = (("width_px", "height_px", "area_ratio") if kind == "2d"
+                      else ("size_x_m", "size_y_m", "size_z_m"))
+            result[kind] = {
+                "images": len(per_image),
+                "boxes": int(sum(per_image)),
+                "per_image": _summary(per_image),
+                "invalid": bad,
+                **({"outside_image": outside, "max_overshoot_px": round(overshoot, 1)}
+                   if kind == "2d" else {}),
+                "sizes": {name: _summary(dims[:, i].tolist()) for i, name in enumerate(labels)},
+                "distinct_names": len(names),
+                "top_names": dict(names.most_common(TOP_CLASSES)),
+            }
+        return result
 
     def evaluate_alignment(self, dataset: str) -> dict:
         return {}  # TODO

@@ -135,5 +135,5 @@ Depth values in both datasets are capped at 10 m (max 10000 mm) by the original 
 | `structure` | done | name, version, source files and SHA-256, disk usage, sample counts and train ratio, index duplicates, missing files and incomplete samples, format / dtype / resolution per field, unreadable files |
 | `rgb` | done | per-channel mean, std, min, max and percentiles (0-1 scale, exact from histograms), image brightness, per-sensor means, dark / bright / low-contrast / broken images (flagged, not removed) |
 | `depth` | done | unit and scale, min / max / mean / median / std and percentiles over valid pixels (exact from histograms), zero / negative / NaN / inf / invalid ratios, valid ratio per sample, implausible values (< 0.1 m, > 10 m), per-sensor means, raw vs. filled difference; samples whose raw depth is less than 50 % measured are flagged |
-| `labels` | TODO | class frequencies, instances, rare classes |
+| `labels` | done | class count and names, pixel frequency per class, classes per image, instances, unlabeled / ignore ratio, 2D and 3D boxes (SUN), rare classes and imbalance; zero-size 3D boxes are flagged |
 | `alignment` | TODO | scene and sensor distribution, train/test overlap |
