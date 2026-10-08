@@ -1,4 +1,4 @@
-"""DataCollector: az adathalmazok letöltése, ellenőrzése és előkészítése."""
+"""DataCollector: download, verify and prepare the datasets."""
 import json
 import shutil
 import time
@@ -21,11 +21,11 @@ class DataCollector:
     def __init__(self, data_root: Path, manifest_path: Path | None = None) -> None:
         self.data_root = Path(data_root)
         self.cfg = load_config(self.data_root)
-        # Ha nem kapunk külön manifestet, a config.toml-ban megadottat használjuk
+        # Fall back to the manifest path from config.toml
         self.manifest_path = Path(manifest_path) if manifest_path else self.cfg.manifest
         with open(self.manifest_path, encoding="utf-8") as f:
             self.manifest = json.load(f)
-        log.info("Manifest betöltve: %s", ", ".join(self.manifest))
+        log.info("Manifest loaded: %s", ", ".join(self.manifest))
 
     def collect(
         self,
@@ -101,26 +101,26 @@ class DataCollector:
         return status
 
     def download_file(self, url: str, target: Path) -> Path:
-        """Letölt egy fájlt; megszakadás után a .part fájlból folytatja."""
+        """Download a file; resumes from the .part file after an interruption."""
         target = Path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         part = target.with_name(target.name + ".part")
         chunk_size = self.cfg.chunk_size_mb * 1024 * 1024
 
         for attempt in range(1, self.cfg.retries + 1):
-            # Ennyi bájt van már meg egy korábbi, félbeszakadt letöltésből
+            # Bytes already present from an earlier, interrupted run
             done = part.stat().st_size if part.exists() else 0
             headers = {"Range": f"bytes={done}-"} if done else {}
             try:
                 with requests.get(url, headers=headers, stream=True,
                                   timeout=self.cfg.timeout_s) as r:
                     if r.status_code == 416:
-                        # 416 = "nincs több adat": a .part már teljes
+                        # 416 = nothing left to send: the .part is complete
                         break
                     r.raise_for_status()
                     if done and r.status_code != 206:
-                        # A szerver nem a kért résztől küldi, ezért elölről kezdjük
-                        log.warning("A szerver nem folytatja a letöltést, elölről kezdem.")
+                        # Server ignored the Range header, so start over
+                        log.warning("Server does not support resuming, starting over.")
                         done = 0
                     total = done + int(r.headers.get("Content-Length", 0))
                     mode = "ab" if done else "wb"
@@ -133,38 +133,38 @@ class DataCollector:
                             bar.update(len(data))
                 break
             except requests.RequestException as e:
-                log.warning("Letöltési hiba (%d/%d. próba): %s",
+                log.warning("Download error (attempt %d/%d): %s",
                             attempt, self.cfg.retries, e)
                 if attempt == self.cfg.retries:
                     raise
                 time.sleep(2 ** attempt)
 
-        # Csak a teljes letöltés után kapja meg a végleges nevét
+        # Rename only after the download is complete
         part.replace(target)
-        log.info("Letöltve: %s", target)
+        log.info("Downloaded: %s", target)
         return target
 
     def verify_download(self, target: Path, spec: dict) -> None:
-        """Ellenőrzi a letöltött fájl méretét, hash-ét és olvashatóságát."""
+        """Check size, SHA-256 hash and readability of a downloaded file."""
         target = Path(target)
         if not target.exists():
-            raise ValidationError(f"Hiányzó fájl: {target}")
+            raise ValidationError(f"Missing file: {target}")
 
         check_size(target, spec["size_bytes"])
 
-        # A hash-számolás egy 7 GB-os fájlnál percekig tart, de csak így biztos
+        # Hashing a 7 GB file takes minutes, but it is the only reliable check
         digest = sha256_of(target)
         if spec.get("sha256") is None:
-            log.info("%s SHA-256: %s (még nincs a manifestben)", target.name, digest)
+            log.info("%s SHA-256: %s (not in manifest yet)", target.name, digest)
         elif digest != spec["sha256"]:
-            raise ValidationError(f"{target.name}: hibás SHA-256 hash")
+            raise ValidationError(f"{target.name}: SHA-256 mismatch")
 
         if spec["kind"] == "zip":
             check_zip(target)
         elif target.suffix == ".mat":
             check_mat(target)
 
-        log.info("Rendben: %s", target.name)
+        log.info("OK: %s", target.name)
 
     def extract_archive(self, archive: Path, destination: Path) -> None:
         """Extract a ZIP (or copy a plain file) into raw/."""

@@ -41,7 +41,7 @@
       }
     ]
   },
-  "nyu_depth_v2": {
+    "nyu_depth_v2": {
     "name": "NYU Depth V2",
     "version": "labeled",
     "files": [
@@ -52,6 +52,15 @@
         "kind": "file",
         "raw": "nyu_depth_v2",
         "size_bytes": 2972037809,
+        "sha256": null
+      },
+      {
+        "id": "nyu_splits",
+        "url": "https://horatio.cs.nyu.edu/mit/silberman/indoor_seg_sup/splits.mat",
+        "download": "nyu_depth_v2/splits.mat",
+        "kind": "file",
+        "raw": "nyu_depth_v2",
+        "size_bytes": 2626,
         "sha256": null
       }
     ]
