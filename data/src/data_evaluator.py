@@ -29,28 +29,48 @@ PERCENTILES = (1, 5, 25, 50, 75, 95, 99)
 RGB_DARK_MEAN = 0.1
 RGB_BRIGHT_MEAN = 0.9
 RGB_LOW_STD = 0.02
+# Depth PNGs: uint16 millimetres, 0 = no measurement
+DEPTH_NEAR_MM = 100     # closer than 0.1 m is physically implausible for these sensors
+DEPTH_FAR_MM = 10000    # beyond 10 m is outside the indoor sensor range
+DEPTH_MIN_VALID = 0.5   # flag samples whose raw depth has fewer measured pixels than this
+DEPTH_DIFF_MM = 10      # raw vs. filled differences above this count as changed
 # Sample ids listed per issue in the report (all of them go to self.problems)
 EXAMPLES = 10
 
 
-def _hist_stats(hist: np.ndarray) -> dict:
-    """Exact statistics of one uint8 channel from its 256-bin histogram, on the 0-1 scale."""
+def _hist_stats(hist: np.ndarray, scale: float = 255, digits: int = 4) -> dict:
+    """Exact statistics from a histogram whose bin i holds the count of value i.
+
+    Values are divided by scale: 255 gives the 0-1 range for uint8, 1 keeps raw values.
+    """
     n = hist.sum()
     if n == 0:
         return {}
-    v = np.arange(256) / 255
+    v = np.arange(len(hist)) / scale
     mean = (v * hist).sum() / n
     std = np.sqrt(((v - mean) ** 2 * hist).sum() / n)
     nonzero = np.flatnonzero(hist)
     cdf = np.cumsum(hist) / n
+
+    def pct(p: float) -> float:
+        return round(int(np.searchsorted(cdf, p / 100)) / scale, digits)
+
     return {
-        "mean": round(float(mean), 4),
-        "std": round(float(std), 4),
-        "min": round(float(nonzero[0]) / 255, 4),
-        "max": round(float(nonzero[-1]) / 255, 4),
-        "percentiles": {str(p): round(int(np.searchsorted(cdf, p / 100)) / 255, 4)
-                        for p in PERCENTILES},
+        "mean": round(float(mean), digits),
+        "std": round(float(std), digits),
+        "min": round(float(nonzero[0]) / scale, digits),
+        "max": round(float(nonzero[-1]) / scale, digits),
+        "median": pct(50),
+        "percentiles": {str(p): pct(p) for p in PERCENTILES},
     }
+
+
+def _summary(values: list[float]) -> dict:
+    """Min, mean and max of a list of per-sample values."""
+    if not values:
+        return {}
+    return {"min": round(float(min(values)), 4), "mean": round(float(np.mean(values)), 4),
+            "max": round(float(max(values)), 4)}
 
 
 class DataEvaluator:
@@ -251,11 +271,7 @@ class DataEvaluator:
             "thresholds": {"dark_mean": RGB_DARK_MEAN, "bright_mean": RGB_BRIGHT_MEAN,
                            "low_contrast_std": RGB_LOW_STD},
             "channels": {name: _hist_stats(total[c]) for c, name in enumerate("RGB")},
-            "brightness": {
-                "min": round(float(min(brightness)), 4),
-                "mean": round(float(np.mean(brightness)), 4),
-                "max": round(float(max(brightness)), 4),
-            } if brightness else {},
+            "brightness": _summary(brightness),
             "by_sensor": by_sensor,
             "flagged": {k: {"count": len(ids), "examples": ids[:EXAMPLES]}
                         for k, ids in flagged.items()},
@@ -263,7 +279,110 @@ class DataEvaluator:
         }
 
     def evaluate_depth(self, dataset: str) -> dict:
-        return {}  # TODO
+        """Depth statistics, invalid and implausible pixels, raw vs. filled depth."""
+        start = time.perf_counter()
+        out = self.cfg.processed / dataset
+        rows = self._subset(self._load_index(dataset))
+        fields = [k for k in ("depth", "depth_raw") if rows and k in rows[0]]
+
+        # One histogram per field: bin i counts the pixels at i mm, exact for uint16
+        hists = {k: np.zeros(65536, np.int64) for k in fields}
+        valid_ratios: dict[str, list[float]] = {k: [] for k in fields}
+        # Per sensor, for the filled depth: [sum of valid mm, valid pixels, all pixels]
+        sensors: dict[str, np.ndarray] = {}
+        # Raw vs. filled: [raw holes, holes filled, both valid, abs diff sum, changed]
+        compare = np.zeros(5, np.int64)
+        flagged = {k: [] for k in ("unreadable", "bad_format", "empty", "low_valid",
+                                   "constant")}
+
+        def flag(kind: str, sample_id: str, message: str) -> None:
+            flagged[kind].append(sample_id)
+            self._problem(dataset, sample_id, "depth", message)
+
+        for r in tqdm(rows, desc=f"Depth {dataset}", unit="sample"):
+            maps = {}
+            for k in fields:
+                try:
+                    with Image.open(out / r[k]) as img:
+                        a = np.asarray(img)
+                except OSError as e:
+                    flag("unreadable", r["id"], f"unreadable {k}: {e}")
+                    continue
+                if a.dtype != np.uint16 or a.ndim != 2:
+                    flag("bad_format", r["id"], f"{k}: {a.dtype} {a.shape}, expected uint16 (H, W)")
+                    continue
+                maps[k] = a
+                hists[k] += np.bincount(a.ravel(), minlength=65536)
+                valid_ratios[k].append(float(np.count_nonzero(a)) / a.size)
+
+            d = maps.get("depth")
+            if d is not None:
+                valid = d > 0
+                ratio = valid.mean()
+                if ratio == 0:
+                    flag("empty", r["id"], "depth has no valid pixels")
+                elif d[valid].min() == d[valid].max():
+                        flag("constant", r["id"], f"constant depth ({d[valid][0]} mm)")
+                s = sensors.setdefault(r["sensor"], np.zeros(3, np.int64))
+                s += (int(d[valid].sum(dtype=np.int64)), int(valid.sum()), d.size)
+
+            # Filled depth is always complete, so judge reliability by the measured pixels
+            measured = maps.get("depth_raw") if "depth_raw" in fields else d
+            if measured is not None:
+                ratio = np.count_nonzero(measured) / measured.size
+                if 0 < ratio < DEPTH_MIN_VALID:
+                    flag("low_valid", r["id"], f"only {ratio:.1%} measured depth pixels")
+
+            raw = maps.get("depth_raw")
+            if d is not None and raw is not None and raw.shape == d.shape:
+                holes = raw == 0
+                both = ~holes & (d > 0)
+                diff = np.abs(d[both].astype(np.int32) - raw[both])
+                compare += (holes.sum(), (holes & (d > 0)).sum(), both.sum(),
+                            diff.sum(dtype=np.int64), (diff > DEPTH_DIFF_MM).sum())
+
+        result = {
+            "checked_samples": len(rows),
+            "unit": "mm",
+            "scale": "uint16 PNG, 1 = 1 mm, 0 = no measurement",
+            "thresholds": {"near_mm": DEPTH_NEAR_MM, "far_mm": DEPTH_FAR_MM,
+                           "min_valid_ratio": DEPTH_MIN_VALID, "diff_mm": DEPTH_DIFF_MM},
+        }
+        for k in fields:
+            h = hists[k]
+            total = h.sum()
+            valid_h = h.copy()
+            valid_h[0] = 0
+            share = (lambda count: round(float(count) / total, 4)) if total else (lambda count: None)
+            result[k] = {
+                # Statistics over valid (> 0) pixels only
+                "valid_pixels": _hist_stats(valid_h, scale=1, digits=1),
+                "pixel_ratios": {
+                    "zero": share(h[0]),
+                    # uint16 PNGs cannot hold negative, NaN or inf values
+                    "negative": 0.0, "nan": 0.0, "inf": 0.0,
+                    "invalid": share(h[0]),
+                    "near": share(h[1:DEPTH_NEAR_MM].sum()),
+                    "far": share(h[DEPTH_FAR_MM + 1:].sum()),
+                },
+                "valid_ratio_per_sample": _summary(valid_ratios[k]),
+            }
+        result["by_sensor"] = {
+            sensor: {"mean_mm": round(s[0] / s[1], 1) if s[1] else None,
+                     "valid_ratio": round(s[1] / s[2], 4) if s[2] else None}
+            for sensor, s in sorted(sensors.items())
+        }
+        holes, filled, both, diff_sum, changed = (int(x) for x in compare)
+        result["raw_vs_filled"] = {
+            "raw_hole_ratio": round(holes / (holes + both), 4) if holes + both else None,
+            "holes_filled_ratio": round(filled / holes, 4) if holes else None,
+            "mean_abs_diff_mm": round(diff_sum / both, 1) if both else None,
+            "changed_ratio": round(changed / both, 4) if both else None,
+        } if "depth_raw" in fields else "not available"
+        result["flagged"] = {k: {"count": len(ids), "examples": ids[:EXAMPLES]}
+                             for k, ids in flagged.items()}
+        result["runtime_s"] = round(time.perf_counter() - start, 1)
+        return result
 
     def evaluate_labels(self, dataset: str) -> dict:
         return {}  # TODO

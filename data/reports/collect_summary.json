@@ -1,21 +1,6 @@
 {
-  "started": "2026-10-08T12:51:31",
+  "started": "2026-10-08T13:20:46",
   "datasets": {
-    "sunrgbd": {
-      "files": {
-        "sunrgbd_data": "skipped",
-        "sunrgbd_toolbox": "skipped",
-        "sunrgbd_meta2d": "skipped",
-        "sunrgbd_meta3d": "skipped"
-      },
-      "verify": {
-        "samples": 10335,
-        "train": 5285,
-        "test": 5050
-      },
-      "index": "C:\\Projects\\latent_crew\\data\\processed\\sunrgbd\\index.jsonl",
-      "index_check": "ok (10335 samples)"
-    },
     "nyu_depth_v2": {
       "files": {
         "nyu_labeled": "skipped",
@@ -30,5 +15,5 @@
       "index_check": "ok (1449 samples)"
     }
   },
-  "finished": "2026-10-08T12:51:54"
+  "finished": "2026-10-08T13:21:49"
 }

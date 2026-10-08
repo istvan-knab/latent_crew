@@ -235,12 +235,12 @@ class DataCollector:
                 raise ValidationError(f"Missing file: {path}")
 
         with h5py.File(mat_path, "r") as f:
-            fields = ["images", "depths", "labels", "instances", "names", "scenes"]
+            fields = ["images", "depths", "rawDepths", "labels", "instances", "names", "scenes"]
             missing = [k for k in fields if k not in f]
             if missing:
                 raise ValidationError(f"{mat_path.name}: missing fields {missing}")
 
-            counts = {k: f[k].shape[0] for k in fields[:4]}
+            counts = {k: f[k].shape[0] for k in fields[:5]}
             if len(set(counts.values())) != 1:
                 raise ValidationError(f"{mat_path.name}: sample counts differ {counts}")
             n = counts["images"]
@@ -381,6 +381,7 @@ class DataCollector:
                     "split": split,
                     "rgb": f"{split}/rgb/{stem}.jpg",
                     "depth": f"{split}/depth/{stem}.png",
+                    "depth_raw": f"{split}/depth_raw/{stem}.png",
                     "semantic": f"{split}/semantic/{stem}.png",
                     "instance": f"{split}/instance/{stem}.png",
                     "scene": scenes[i],
@@ -388,17 +389,22 @@ class DataCollector:
                 }
                 rows.append(row)
 
-                # Skip samples that an earlier run already wrote
-                if all((out / row[k]).exists() for k in PATH_KEYS if k in row):
+                # Only write the files that an earlier run did not
+                todo = [k for k in PATH_KEYS if not (out / row[k]).exists()]
+                if not todo:
                     continue
 
                 s = read_nyu_sample(f, i)
+                arrays = {
+                    "rgb": s["rgb"],
+                    "semantic": s["semantic"].astype(np.uint16),
+                    "instance": s["instance"].astype(np.uint8),
+                }
                 # Depth is stored in metres; save it as uint16 millimetres
-                depth_mm = np.clip(np.round(s["depth"] * 1000), 0, 65535).astype(np.uint16)
-                save_image(s["rgb"], out / row["rgb"])
-                save_image(depth_mm, out / row["depth"])
-                save_image(s["semantic"].astype(np.uint16), out / row["semantic"])
-                save_image(s["instance"].astype(np.uint8), out / row["instance"])
+                for k in ("depth", "depth_raw"):
+                    arrays[k] = np.clip(np.round(s[k] * 1000), 0, 65535).astype(np.uint16)
+                for k in todo:
+                    save_image(arrays[k], out / row[k])
 
         return self._write_index("nyu_depth_v2", rows, classes)
 

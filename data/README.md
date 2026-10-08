@@ -57,7 +57,7 @@ Measured on one machine, only as a rough guide:
 | `--prepare` NYU, first run | ~1.5 min |
 | `--prepare` SUN, first run | ~11 min |
 | Full run when everything is already prepared | ~30 s |
-| `data_evaluation.py`, all samples (structure, rgb) | ~2.5 min |
+| `data_evaluation.py`, all samples (structure, rgb, depth) | ~5.5 min |
 
 ## Layout
 
@@ -106,7 +106,7 @@ One JSON object per line. All paths are relative to `processed/<dataset>/`.
 | `id` | `sun_NNNNNN` or `nyu_NNNNNN` |
 | `split` | `train` or `test` |
 | `rgb`, `depth`, `semantic`, `instance` | Image paths |
-| `depth_raw` | SUN only: raw sensor depth (holes = 0) |
+| `depth_raw` | Raw sensor depth (holes = 0) |
 | `scene` | Scene type (`unknown` if missing) |
 | `sensor` | `kinect_v1`, `kinect_v2`, `realsense` or `xtion` |
 | `source` | SUN only: original sample folder under `raw/sunrgbd/` |
@@ -116,12 +116,14 @@ One JSON object per line. All paths are relative to `processed/<dataset>/`.
 | Field | Format | SUN RGB-D | NYU Depth V2 |
 |---|---|---|---|
 | `rgb` | JPEG | uint8, copied unchanged | uint8, quality 95 |
-| `depth` | PNG | uint16, mm, hole-filled (`depth_bfx`) | uint16, mm, hole-filled |
-| `depth_raw` | PNG | uint16, mm, 0 = no measurement | – |
+| `depth` | PNG | uint16, mm, hole-filled (`depth_bfx`) | uint16, mm, hole-filled (`depths`) |
+| `depth_raw` | PNG | uint16, mm, 0 = no measurement | uint16, mm, 0 = no measurement (`rawDepths`) |
 | `semantic` | PNG | **uint8**, 37 classes | **uint16**, 894 classes |
 | `instance` | PNG | **uint16** | **uint8** |
 
 `classes.json` is `["unlabeled", ...names]`: label 0 means unlabeled, label k is `classes[k]`. Note that the semantic and instance dtypes are swapped between the two datasets, and the class sets differ (37 vs 894), so joint training needs a common class mapping.
+
+Depth values in both datasets are capped at 10 m (max 10000 mm) by the original data. The filled `depth` has no holes; how much of it was actually measured is shown by `depth_raw` (on average 84 % for SUN, 69 % for NYU).
 
 ## Evaluation report
 
@@ -132,6 +134,6 @@ One JSON object per line. All paths are relative to `processed/<dataset>/`.
 | program | done | git commit, Python, numpy and Pillow versions |
 | `structure` | done | name, version, source files and SHA-256, disk usage, sample counts and train ratio, index duplicates, missing files and incomplete samples, format / dtype / resolution per field, unreadable files |
 | `rgb` | done | per-channel mean, std, min, max and percentiles (0-1 scale, exact from histograms), image brightness, per-sensor means, dark / bright / low-contrast / broken images (flagged, not removed) |
-| `depth` | TODO | depth statistics, invalid pixels, raw vs. filled |
+| `depth` | done | unit and scale, min / max / mean / median / std and percentiles over valid pixels (exact from histograms), zero / negative / NaN / inf / invalid ratios, valid ratio per sample, implausible values (< 0.1 m, > 10 m), per-sensor means, raw vs. filled difference; samples whose raw depth is less than 50 % measured are flagged |
 | `labels` | TODO | class frequencies, instances, rare classes |
 | `alignment` | TODO | scene and sensor distribution, train/test overlap |

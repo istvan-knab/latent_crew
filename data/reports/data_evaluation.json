@@ -1,7 +1,7 @@
 {
-  "created": "2026-10-08T13:09:02",
+  "created": "2026-10-08T13:31:41",
   "program": {
-    "git_commit": "a0c3eea",
+    "git_commit": "e04ca63",
     "python": "3.14.8",
     "numpy": "2.5.3",
     "pillow": "12.3.0"
@@ -127,7 +127,7 @@
           }
         },
         "unreadable_files": {},
-        "runtime_s": 33.0
+        "runtime_s": 34.6
       },
       "rgb": {
         "checked_samples": 10335,
@@ -143,6 +143,7 @@
             "std": 0.2778,
             "min": 0.0,
             "max": 1.0,
+            "median": 0.4941,
             "percentiles": {
               "1": 0.0,
               "5": 0.0627,
@@ -158,6 +159,7 @@
             "std": 0.2862,
             "min": 0.0,
             "max": 1.0,
+            "median": 0.4471,
             "percentiles": {
               "1": 0.0,
               "5": 0.0353,
@@ -173,6 +175,7 @@
             "std": 0.2911,
             "min": 0.0,
             "max": 1.0,
+            "median": 0.4078,
             "percentiles": {
               "1": 0.0,
               "5": 0.0196,
@@ -276,9 +279,141 @@
             "examples": []
           }
         },
-        "runtime_s": 100.2
+        "runtime_s": 103.0
       },
-      "depth": {},
+      "depth": {
+        "checked_samples": 10335,
+        "unit": "mm",
+        "scale": "uint16 PNG, 1 = 1 mm, 0 = no measurement",
+        "thresholds": {
+          "near_mm": 100,
+          "far_mm": 10000,
+          "min_valid_ratio": 0.5,
+          "diff_mm": 10
+        },
+        "depth": {
+          "valid_pixels": {
+            "mean": 2398.3,
+            "std": 1248.9,
+            "min": 351.0,
+            "max": 10000.0,
+            "median": 2085.0,
+            "percentiles": {
+              "1": 684.0,
+              "5": 990.0,
+              "25": 1588.0,
+              "50": 2085.0,
+              "75": 2877.0,
+              "95": 4866.0,
+              "99": 6993.0
+            }
+          },
+          "pixel_ratios": {
+            "zero": 0.0,
+            "negative": 0.0,
+            "nan": 0.0,
+            "inf": 0.0,
+            "invalid": 0.0,
+            "near": 0.0,
+            "far": 0.0
+          },
+          "valid_ratio_per_sample": {
+            "min": 1.0,
+            "mean": 1.0,
+            "max": 1.0
+          }
+        },
+        "depth_raw": {
+          "valid_pixels": {
+            "mean": 2306.3,
+            "std": 1122.5,
+            "min": 351.0,
+            "max": 10000.0,
+            "median": 2038.0,
+            "percentiles": {
+              "1": 734.0,
+              "5": 1022.0,
+              "25": 1580.0,
+              "50": 2038.0,
+              "75": 2742.0,
+              "95": 4490.0,
+              "99": 6375.0
+            }
+          },
+          "pixel_ratios": {
+            "zero": 0.1739,
+            "negative": 0.0,
+            "nan": 0.0,
+            "inf": 0.0,
+            "invalid": 0.1739,
+            "near": 0.0,
+            "far": 0.0
+          },
+          "valid_ratio_per_sample": {
+            "min": 0.3058,
+            "mean": 0.8449,
+            "max": 1.0
+          }
+        },
+        "by_sensor": {
+          "kinect_v1": {
+            "mean_mm": 2444.4,
+            "valid_ratio": 1.0
+          },
+          "kinect_v2": {
+            "mean_mm": 2441.4,
+            "valid_ratio": 1.0
+          },
+          "realsense": {
+            "mean_mm": 2047.1,
+            "valid_ratio": 1.0
+          },
+          "xtion": {
+            "mean_mm": 2468.2,
+            "valid_ratio": 1.0
+          }
+        },
+        "raw_vs_filled": {
+          "raw_hole_ratio": 0.1739,
+          "holes_filled_ratio": 1.0,
+          "mean_abs_diff_mm": 3.9,
+          "changed_ratio": 0.0544
+        },
+        "flagged": {
+          "unreadable": {
+            "count": 0,
+            "examples": []
+          },
+          "bad_format": {
+            "count": 0,
+            "examples": []
+          },
+          "empty": {
+            "count": 0,
+            "examples": []
+          },
+          "low_valid": {
+            "count": 372,
+            "examples": [
+              "sun_000013",
+              "sun_000134",
+              "sun_000135",
+              "sun_000141",
+              "sun_000144",
+              "sun_000151",
+              "sun_000152",
+              "sun_000153",
+              "sun_000154",
+              "sun_000155"
+            ]
+          },
+          "constant": {
+            "count": 0,
+            "examples": []
+          }
+        },
+        "runtime_s": 133.5
+      },
       "labels": {},
       "alignment": {}
     },
@@ -301,8 +436,8 @@
         "disk_usage": {
           "downloads_bytes": 2972040435,
           "downloads": "2.8 GiB",
-          "processed_bytes": 449901136,
-          "processed": "429.1 MiB"
+          "processed_bytes": 648698517,
+          "processed": "618.6 MiB"
         },
         "samples": {
           "total": 1449,
@@ -341,6 +476,17 @@
               "640x480": 1449
             }
           },
+          "depth_raw": {
+            "format": {
+              "PNG": 1449
+            },
+            "dtype": {
+              "uint16": 1449
+            },
+            "resolution": {
+              "640x480": 1449
+            }
+          },
           "semantic": {
             "format": {
               "PNG": 1449
@@ -365,7 +511,7 @@
           }
         },
         "unreadable_files": {},
-        "runtime_s": 4.2
+        "runtime_s": 5.7
       },
       "rgb": {
         "checked_samples": 1449,
@@ -381,6 +527,7 @@
             "std": 0.289,
             "min": 0.0,
             "max": 1.0,
+            "median": 0.4588,
             "percentiles": {
               "1": 0.0039,
               "5": 0.0392,
@@ -396,6 +543,7 @@
             "std": 0.2956,
             "min": 0.0,
             "max": 1.0,
+            "median": 0.3686,
             "percentiles": {
               "1": 0.0039,
               "5": 0.0118,
@@ -411,6 +559,7 @@
             "std": 0.3085,
             "min": 0.0,
             "max": 1.0,
+            "median": 0.3373,
             "percentiles": {
               "1": 0.0,
               "5": 0.0078,
@@ -467,13 +616,133 @@
             "examples": []
           }
         },
-        "runtime_s": 13.3
+        "runtime_s": 13.1
       },
-      "depth": {},
+      "depth": {
+        "checked_samples": 1449,
+        "unit": "mm",
+        "scale": "uint16 PNG, 1 = 1 mm, 0 = no measurement",
+        "thresholds": {
+          "near_mm": 100,
+          "far_mm": 10000,
+          "min_valid_ratio": 0.5,
+          "diff_mm": 10
+        },
+        "depth": {
+          "valid_pixels": {
+            "mean": 2796.3,
+            "std": 1386.1,
+            "min": 713.0,
+            "max": 9995.0,
+            "median": 2506.0,
+            "percentiles": {
+              "1": 826.0,
+              "5": 1118.0,
+              "25": 1832.0,
+              "50": 2506.0,
+              "75": 3426.0,
+              "95": 5478.0,
+              "99": 7555.0
+            }
+          },
+          "pixel_ratios": {
+            "zero": 0.0,
+            "negative": 0.0,
+            "nan": 0.0,
+            "inf": 0.0,
+            "invalid": 0.0,
+            "near": 0.0,
+            "far": 0.0
+          },
+          "valid_ratio_per_sample": {
+            "min": 1.0,
+            "mean": 1.0,
+            "max": 1.0
+          }
+        },
+        "depth_raw": {
+          "valid_pixels": {
+            "mean": 2727.0,
+            "std": 1318.3,
+            "min": 713.0,
+            "max": 10000.0,
+            "median": 2456.0,
+            "percentiles": {
+              "1": 863.0,
+              "5": 1140.0,
+              "25": 1821.0,
+              "50": 2456.0,
+              "75": 3305.0,
+              "95": 5204.0,
+              "99": 7243.0
+            }
+          },
+          "pixel_ratios": {
+            "zero": 0.3143,
+            "negative": 0.0,
+            "nan": 0.0,
+            "inf": 0.0,
+            "invalid": 0.3143,
+            "near": 0.0,
+            "far": 0.0
+          },
+          "valid_ratio_per_sample": {
+            "min": 0.1489,
+            "mean": 0.6857,
+            "max": 0.7929
+          }
+        },
+        "by_sensor": {
+          "kinect_v1": {
+            "mean_mm": 2796.3,
+            "valid_ratio": 1.0
+          }
+        },
+        "raw_vs_filled": {
+          "raw_hole_ratio": 0.3143,
+          "holes_filled_ratio": 1.0,
+          "mean_abs_diff_mm": 7.0,
+          "changed_ratio": 0.0701
+        },
+        "flagged": {
+          "unreadable": {
+            "count": 0,
+            "examples": []
+          },
+          "bad_format": {
+            "count": 0,
+            "examples": []
+          },
+          "empty": {
+            "count": 0,
+            "examples": []
+          },
+          "low_valid": {
+            "count": 56,
+            "examples": [
+              "nyu_000014",
+              "nyu_000117",
+              "nyu_000121",
+              "nyu_000123",
+              "nyu_000145",
+              "nyu_000223",
+              "nyu_000224",
+              "nyu_000225",
+              "nyu_000229",
+              "nyu_000230"
+            ]
+          },
+          "constant": {
+            "count": 0,
+            "examples": []
+          }
+        },
+        "runtime_s": 17.1
+      },
       "labels": {},
       "alignment": {}
     }
   },
-  "problematic_samples": 36,
-  "runtime_s": 150.8
+  "problematic_samples": 464,
+  "runtime_s": 307.3
 }

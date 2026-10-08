@@ -40,6 +40,7 @@ def read_nyu_sample(f: h5py.File, i: int) -> dict:
     return {
         "rgb": f["images"][i].transpose(2, 1, 0),
         "depth": f["depths"][i].T,
+        "depth_raw": f["rawDepths"][i].T,
         "semantic": f["labels"][i].T,
         "instance": f["instances"][i].T,
     }
