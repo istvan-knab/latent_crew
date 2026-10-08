@@ -3,6 +3,7 @@ import json
 import shutil
 import time
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -10,7 +11,7 @@ from tqdm import tqdm
 
 from .config import load_config
 from .extractors import safe_extract_zip
-from .utils import get_logger, sha256_of
+from .utils import free_space_bytes, get_logger, human_size, sha256_of
 from .validators import ValidationError, check_mat, check_size, check_zip
 
 log = get_logger(__name__)
@@ -36,7 +37,68 @@ class DataCollector:
         include_raw_nyu: bool = False,
         force: bool = False,
     ) -> dict:
-        raise NotImplementedError
+        """Run the full pipeline; returns a summary that is also saved to reports/."""
+        if include_raw_nyu:
+            log.warning("Raw NYU download is not supported yet, skipping it.")
+
+        free = free_space_bytes(self.cfg.downloads)
+        if free < self.cfg.min_free_space_gb * 1024**3:
+            raise ValidationError(
+                f"Not enough free space: {human_size(free)} "
+                f"(need {self.cfg.min_free_space_gb} GiB)"
+            )
+
+        summary = {"started": datetime.now().isoformat(timespec="seconds"), "datasets": {}}
+        for name in datasets:
+            if name not in self.manifest:
+                raise ValidationError(f"Unknown dataset: {name}")
+            files = {}
+            for spec in self.manifest[name]["files"]:
+                target = self.cfg.downloads / spec["download"]
+                dest = self.cfg.raw / spec["raw"]
+                files[spec["id"]] = self._collect_file(spec, target, dest,
+                                                       verify, extract, force)
+            result = {"files": files}
+            if verify and extract:
+                result["verify"] = self.verify_dataset(name)
+            if prepare:
+                result["index"] = str(self.prepare_dataset(name))
+            summary["datasets"][name] = result
+
+        summary["finished"] = datetime.now().isoformat(timespec="seconds")
+        self.cfg.reports.mkdir(parents=True, exist_ok=True)
+        out = self.cfg.reports / "collect_summary.json"
+        out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        log.info("Summary written to %s", out)
+        return summary
+
+    def _collect_file(self, spec: dict, target: Path, dest: Path,
+                      verify: bool, extract: bool, force: bool) -> str:
+        """Download, verify and extract one manifest entry; returns its status."""
+        marker = dest / f".done_{target.name}"
+        if force:
+            target.unlink(missing_ok=True)
+            marker.unlink(missing_ok=True)
+
+        status = "skipped"
+        if target.exists():
+            try:
+                self.verify_download(target, spec)
+            except ValidationError as e:
+                # Broken or incomplete file: delete it and download again
+                log.warning("%s, downloading again", e)
+                target.unlink()
+                marker.unlink(missing_ok=True)
+
+        if not target.exists():
+            self.download_file(spec["url"], target)
+            if verify:
+                self.verify_download(target, spec)
+            status = "downloaded"
+
+        if extract:
+            self.extract_archive(target, dest)
+        return status
 
     def download_file(self, url: str, target: Path) -> Path:
         """Letölt egy fájlt; megszakadás után a .part fájlból folytatja."""
@@ -51,7 +113,7 @@ class DataCollector:
             headers = {"Range": f"bytes={done}-"} if done else {}
             try:
                 with requests.get(url, headers=headers, stream=True,
-                                timeout=self.cfg.timeout_s) as r:
+                                  timeout=self.cfg.timeout_s) as r:
                     if r.status_code == 416:
                         # 416 = "nincs több adat": a .part már teljes
                         break
@@ -103,7 +165,7 @@ class DataCollector:
             check_mat(target)
 
         log.info("Rendben: %s", target.name)
-        
+
     def extract_archive(self, archive: Path, destination: Path) -> None:
         """Extract a ZIP (or copy a plain file) into raw/."""
         archive, destination = Path(archive), Path(destination)
@@ -123,7 +185,8 @@ class DataCollector:
         marker.write_text("ok\n", encoding="utf-8")
 
     def verify_dataset(self, dataset: str) -> dict:
-        raise NotImplementedError
+        log.warning("verify_dataset is not implemented yet, skipping: %s", dataset)
+        return {}
 
     def prepare_dataset(self, dataset: str) -> Path:
         raise NotImplementedError
