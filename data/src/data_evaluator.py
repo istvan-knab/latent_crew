@@ -1,4 +1,5 @@
 """DataEvaluator: statistics and quality report for the prepared datasets."""
+import hashlib
 import json
 import platform
 import random
@@ -40,6 +41,19 @@ DEPTH_DIFF_MM = 10      # raw vs. filled differences above this count as changed
 RARE_PIXEL_RATIO = 0.001
 RARE_IMAGES = 10
 TOP_CLASSES = 10
+# RGB-depth alignment: depth edges are relative depth jumps above DEPTH_EDGE between
+# neighbouring pixels, RGB edges the strongest RGB_EDGE_SHARE of the gradients.
+# The best of all shifts up to MAX_SHIFT px is searched; a sample is flagged when it
+# is more than SHIFT_FLAG px away and matches SHIFT_GAIN times better than no shift.
+DEPTH_EDGE = 0.05
+RGB_EDGE_SHARE = 0.1
+MAX_SHIFT = 6
+SHIFT_FLAG = 2
+SHIFT_GAIN = 2.0
+MIN_DEPTH_EDGES = 500
+# Near duplicates: 256-bit difference hashes (16x16) at most this many bits apart
+HASH_SIZE = 16
+NEAR_DUP_BITS = 10
 # Sample ids listed per issue in the report (all of them go to self.problems)
 EXAMPLES = 10
 
@@ -77,6 +91,83 @@ def _summary(values: list[float]) -> dict:
         return {}
     return {"min": round(float(min(values)), 4), "mean": round(float(np.mean(values)), 4),
             "max": round(float(max(values)), 4)}
+
+
+def _split_table(rows: list[dict], key: str) -> dict:
+    """Train/test counts per value of an index field, and values seen in one split only."""
+    table: dict[str, Counter] = {}
+    for r in rows:
+        table.setdefault(r.get(key, "unknown"), Counter())[r["split"]] += 1
+    order = sorted(table, key=lambda v: -sum(table[v].values()))
+    return {
+        "values": len(table),
+        "counts": {v: {"train": table[v]["train"], "test": table[v]["test"]} for v in order},
+        "train_only": [v for v in order if not table[v]["test"]],
+        "test_only": [v for v in order if not table[v]["train"]],
+    }
+
+
+def _best_shift(gray: np.ndarray, depth: np.ndarray) -> tuple | None:
+    """Shift (dy, dx) at which depth edges fall best on RGB edges.
+
+    Returns ((dy, dx), match without shift, best match), or None if the depth map
+    has too few edges to tell.
+    """
+    valid = depth > 0
+    edges = np.zeros(depth.shape, bool)
+    for a, b in ((depth[:, 1:], depth[:, :-1]), (depth[1:, :], depth[:-1, :])):
+        ok = (a > 0) & (b > 0)
+        jump = np.abs(a - b) > DEPTH_EDGE * np.minimum(a, b)
+        edges[:a.shape[0], :a.shape[1]] |= ok & jump
+    edges &= valid
+    grad = np.zeros(gray.shape, np.float32)
+    grad[:, :-1] = np.abs(np.diff(gray, axis=1))
+    grad[:-1, :] = np.maximum(grad[:-1, :], np.abs(np.diff(gray, axis=0)))
+    rgb_edges = grad > np.quantile(grad, 1 - RGB_EDGE_SHARE)
+
+    m = MAX_SHIFT
+    ys, xs = np.nonzero(edges[m:-m, m:-m])
+    if len(ys) < MIN_DEPTH_EDGES:
+        return None
+    ys, xs = ys + m, xs + m
+    # Smaller shifts first, so ties keep the smallest one
+    candidates = sorted(((dy, dx) for dy in range(-m, m + 1) for dx in range(-m, m + 1)),
+                        key=lambda s: (max(abs(s[0]), abs(s[1])), abs(s[0]) + abs(s[1])))
+    best_shift, best = (0, 0), -1.0
+    for dy, dx in candidates:
+        score = float(rgb_edges[ys + dy, xs + dx].mean())
+        if dy == dx == 0:
+            score0 = score
+        if score > best:
+            best_shift, best = (dy, dx), score
+    return best_shift, score0, best
+
+
+def _near_duplicates(hashes: list[np.ndarray], splits: list[str], ids: list[str]) -> dict:
+    """Pairs of images whose difference hashes are at most NEAR_DUP_BITS apart."""
+    h = np.array(hashes).view(np.uint64) if hashes else np.zeros((0, 1), np.uint64)
+    split = np.array(splits)
+    pairs = Counter()
+    test_with_train, examples = set(), []
+    for i in range(len(h) - 1):
+        bits = np.bitwise_count(h[i + 1:] ^ h[i]).sum(axis=1)
+        close = np.flatnonzero(bits <= NEAR_DUP_BITS) + i + 1
+        for j in close:
+            kind = (split[i], split[j])
+            if kind[0] == kind[1]:
+                pairs[f"within_{kind[0]}"] += 1
+            else:
+                pairs["train_test"] += 1
+                test_with_train.add(ids[i] if kind[0] == "test" else ids[j])
+                if len(examples) < EXAMPLES:
+                    examples.append([ids[i], ids[j]])
+    return {
+        "near_pairs_within_train": pairs["within_train"],
+        "near_pairs_within_test": pairs["within_test"],
+        "near_pairs_train_test": pairs["train_test"],
+        "test_samples_with_near_train": len(test_with_train),
+        "train_test_examples": examples,
+    }
 
 
 class DataEvaluator:
@@ -555,7 +646,122 @@ class DataEvaluator:
         return result
 
     def evaluate_alignment(self, dataset: str) -> dict:
-        return {}  # TODO
+        """Scene and sensor balance, per-sample alignment, duplicates and overlaps."""
+        start = time.perf_counter()
+        out = self.cfg.processed / dataset
+        all_rows = self._load_index(dataset)
+        rows = self._subset(all_rows)
+        fields = [k for k in PATH_KEYS if k in all_rows[0]] if all_rows else []
+        flagged = {k: [] for k in ("unreadable", "size_mismatch", "misaligned",
+                                   "duplicate")}
+
+        def flag(kind: str, sample_id: str, message: str) -> None:
+            flagged[kind].append(sample_id)
+            self._problem(dataset, sample_id, "alignment", message)
+
+        shifts, scores, hashes, dhashes, splits, ids = Counter(), [], {}, [], [], []
+        sensor_dist: dict[str, Counter] = {}
+        no_edges = 0
+        for r in tqdm(rows, desc=f"Alignment {dataset}", unit="sample"):
+            try:
+                sizes = {}
+                for k in fields:
+                    with Image.open(out / r[k]) as img:
+                        sizes[k] = img.size
+                rgb_bytes = (out / r["rgb"]).read_bytes()
+                with Image.open(out / r["rgb"]) as img:
+                    gray = img.convert("L")
+                    small = np.asarray(gray.resize((HASH_SIZE + 1, HASH_SIZE),
+                                                   Image.Resampling.BILINEAR),
+                                       np.int16)
+                    gray = np.asarray(gray, np.float32)
+                with Image.open(out / r["depth"]) as img:
+                    depth = np.asarray(img, np.float32)
+            except OSError as e:
+                flag("unreadable", r["id"], f"unreadable file: {e}")
+                continue
+            if len(set(sizes.values())) > 1:
+                flag("size_mismatch", r["id"], f"resolutions differ: {sizes}")
+                continue
+
+            # Exact duplicates by file content, near duplicates by difference hash
+            digest = hashlib.sha256(rgb_bytes).hexdigest()
+            if digest in hashes:
+                flag("duplicate", r["id"], f"same RGB file as {hashes[digest]}")
+            else:
+                hashes[digest] = r["id"]
+            bits = (small[:, 1:] > small[:, :-1]).ravel()
+            dhashes.append(np.packbits(bits))
+            splits.append(r["split"])
+            ids.append(r["id"])
+
+            shift = _best_shift(gray, depth)
+            if shift is None:
+                no_edges += 1
+                continue
+            (dy, dx), score0, best = shift
+            shifts[(dy, dx)] += 1
+            sensor_dist.setdefault(r.get("sensor", "unknown"), Counter())[
+                max(abs(dy), abs(dx))] += 1
+            scores.append(score0)
+            if max(abs(dy), abs(dx)) > SHIFT_FLAG and best > SHIFT_GAIN * score0:
+                flag("misaligned", r["id"], f"depth edges match RGB best at shift "
+                     f"dy={dy}, dx={dx} px ({best:.2f} vs. {score0:.2f} unshifted)")
+
+        checked = sum(shifts.values())
+        distance = Counter()
+        for (dy, dx), c in shifts.items():
+            distance[max(abs(dy), abs(dx))] += c
+        result = {
+            "checked_samples": len(rows),
+            "thresholds": {"depth_edge": DEPTH_EDGE, "rgb_edge_share": RGB_EDGE_SHARE,
+                           "max_shift_px": MAX_SHIFT, "flag_shift_px": SHIFT_FLAG,
+                           "flag_gain": SHIFT_GAIN, "near_duplicate_bits": NEAR_DUP_BITS},
+            "scenes": _split_table(all_rows, "scene"),
+            "sensors": _split_table(all_rows, "sensor"),
+            "rgb_depth_alignment": {
+                "checked": checked,
+                "too_few_depth_edges": no_edges,
+                "best_shift_px": {str(d): c for d, c in sorted(distance.items())},
+                "unshifted_ratio": round(shifts[(0, 0)] / checked, 4) if checked else None,
+                "edge_match_unshifted": _summary(scores),
+                "best_shift_px_per_sensor": {
+                    s: {str(d): c for d, c in sorted(dist.items())}
+                    for s, dist in sorted(sensor_dist.items())},
+            },
+            "duplicates": {
+                "exact_rgb": len(flagged["duplicate"]),
+                **_near_duplicates(dhashes, splits, ids),
+            },
+        }
+        if dataset == "sunrgbd":
+            result["nyu_overlap"] = self._nyu_in_sun(all_rows)
+        result["flagged"] = {k: {"count": len(v), "examples": v[:EXAMPLES]}
+                             for k, v in flagged.items()}
+        # All checks of this dataset have run: summarise the samples to exclude
+        mine = [p for p in self.problems if p["dataset"] == dataset]
+        by_check = Counter()
+        for check in {(p["id"], p["check"]) for p in mine}:
+            by_check[check[1]] += 1
+        result["exclude_candidates"] = {"samples": len({p["id"] for p in mine}),
+                                        "by_check": dict(by_check)}
+        result["runtime_s"] = round(time.perf_counter() - start, 1)
+        return result
+
+    def _nyu_in_sun(self, rows: list[dict]) -> dict:
+        """SUN RGB-D includes the NYU labelled set; check that the splits agree."""
+        sun = {int(r["source"].rsplit("NYU", 1)[1]): r for r in rows
+               if "/NYUdata/NYU" in r.get("source", "")}
+        result = {"sun_samples_from_nyu": len(sun)}
+        if not (self.cfg.processed / "nyu_depth_v2" / "index.jsonl").exists():
+            result["split_check"] = "nyu_depth_v2 not prepared"
+            return result
+        nyu = {int(r["id"].rsplit("_", 1)[1]): r for r in self._load_index("nyu_depth_v2")}
+        common = sun.keys() & nyu.keys()
+        differ = [sun[i]["id"] for i in sorted(common) if sun[i]["split"] != nyu[i]["split"]]
+        result.update({"matched": len(common), "split_differs": len(differ),
+                       "split_differs_examples": differ[:EXAMPLES]})
+        return result
 
     def write_reports(self, result: dict, output_dir: Path | None = None) -> None:
         """Write the full JSON report and a short Markdown summary."""

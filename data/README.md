@@ -57,7 +57,7 @@ Measured on one machine, only as a rough guide:
 | `--prepare` NYU, first run | ~1.5 min |
 | `--prepare` SUN, first run | ~11 min |
 | Full run when everything is already prepared | ~30 s |
-| `data_evaluation.py`, all samples (structure, rgb, depth) | ~5.5 min |
+| `data_evaluation.py`, all samples (structure, rgb, depth, labels, alignment) | ~13.5 min |
 
 ## Layout
 
@@ -136,4 +136,4 @@ Depth values in both datasets are capped at 10 m (max 10000 mm) by the original 
 | `rgb` | done | per-channel mean, std, min, max and percentiles (0-1 scale, exact from histograms), image brightness, per-sensor means, dark / bright / low-contrast / broken images (flagged, not removed) |
 | `depth` | done | unit and scale, min / max / mean / median / std and percentiles over valid pixels (exact from histograms), zero / negative / NaN / inf / invalid ratios, valid ratio per sample, implausible values (< 0.1 m, > 10 m), per-sensor means, raw vs. filled difference; samples whose raw depth is less than 50 % measured are flagged |
 | `labels` | done | class count and names, pixel frequency per class, classes per image, instances, unlabeled / ignore ratio, 2D and 3D boxes (SUN), rare classes and imbalance; zero-size 3D boxes are flagged |
-| `alignment` | TODO | scene and sensor distribution, train/test overlap |
+| `alignment` | done | scene and sensor counts per split, scenes in one split only, per-sample resolution match, RGB-depth edge alignment (best shift per sensor; samples > 2 px off and clearly better shifted are flagged), exact (SHA-256) and near (difference hash) duplicates within and across splits, SUN / NYU overlap, summary of samples to exclude |
