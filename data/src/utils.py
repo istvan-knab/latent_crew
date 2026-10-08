@@ -4,6 +4,9 @@ import logging
 import shutil
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
 
 def get_logger(name: str) -> logging.Logger:
     """Return a logger that prints timestamped messages."""
@@ -40,3 +43,11 @@ def human_size(num_bytes: float) -> str:
             return f"{num_bytes:.1f} {unit}"
         num_bytes /= 1024
     return f"{num_bytes:.1f} PiB"
+
+def save_image(array: np.ndarray, path: Path) -> None:
+    """Save an array as an image; written to a temp file first, so it is never half-done."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.stem + ".tmp" + path.suffix)
+    Image.fromarray(array).save(tmp, quality=95)  # quality only matters for JPEG
+    tmp.replace(path)

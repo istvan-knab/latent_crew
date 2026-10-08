@@ -7,13 +7,14 @@ from datetime import datetime
 from pathlib import Path
 
 import h5py
+import numpy as np
 import requests
 import scipy.io
 from tqdm import tqdm
 
 from .config import load_config
-from .extractors import read_nyu_sample, safe_extract_zip
-from .utils import free_space_bytes, get_logger, human_size, sha256_of
+from .extractors import h5_strings, read_nyu_sample, safe_extract_zip
+from .utils import free_space_bytes, get_logger, human_size, save_image, sha256_of
 from .validators import ValidationError, check_mat, check_size, check_zip
 
 log = get_logger(__name__)
@@ -230,4 +231,63 @@ class DataCollector:
         return {"samples": n, "train": len(train), "test": len(test)}
 
     def prepare_dataset(self, dataset: str) -> Path:
-        raise NotImplementedError
+        """Convert raw/ data into processed/<dataset>/{train,test} plus index.jsonl."""
+        if dataset == "nyu_depth_v2":
+            return self._prepare_nyu()
+        raise NotImplementedError(f"prepare_dataset is not implemented yet: {dataset}")
+
+    def _prepare_nyu(self) -> Path:
+        raw = self.cfg.raw / "nyu_depth_v2"
+        out = self.cfg.processed / "nyu_depth_v2"
+        out.mkdir(parents=True, exist_ok=True)
+        # splits.mat uses 1-based MATLAB indices
+        test = set(scipy.io.loadmat(raw / "splits.mat")["testNdxs"].ravel().tolist())
+
+        rows = []
+        with h5py.File(raw / "nyu_depth_v2_labeled.mat", "r") as f:
+            scenes = h5_strings(f, "sceneTypes")
+            # Label 0 means unlabeled, label k is names[k - 1]
+            classes = ["unlabeled"] + h5_strings(f, "names")
+
+            for i in tqdm(range(len(scenes)), desc="Preparing NYU", unit="sample"):
+                num = i + 1
+                split = "test" if num in test else "train"
+                stem = f"{num:06d}"
+                row = {
+                    "id": f"nyu_{stem}",
+                    "dataset": "nyu_depth_v2",
+                    "split": split,
+                    "rgb": f"{split}/rgb/{stem}.jpg",
+                    "depth": f"{split}/depth/{stem}.png",
+                    "semantic": f"{split}/semantic/{stem}.png",
+                    "instance": f"{split}/instance/{stem}.png",
+                    "scene": scenes[i],
+                    "sensor": "kinect_v1",
+                }
+                rows.append(row)
+
+                # Skip samples that an earlier run already wrote
+                keys = ("rgb", "depth", "semantic", "instance")
+                if all((out / row[k]).exists() for k in keys):
+                    continue
+
+                s = read_nyu_sample(f, i)
+                # Depth is stored in metres; save it as uint16 millimetres
+                depth_mm = np.clip(np.round(s["depth"] * 1000), 0, 65535).astype(np.uint16)
+                save_image(s["rgb"], out / row["rgb"])
+                save_image(depth_mm, out / row["depth"])
+                save_image(s["semantic"].astype(np.uint16), out / row["semantic"])
+                save_image(s["instance"].astype(np.uint8), out / row["instance"])
+
+        (out / "classes.json").write_text(json.dumps(classes, indent=2), encoding="utf-8")
+        index = out / "index.jsonl"
+        tmp = index.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        tmp.replace(index)
+
+        n_test = sum(r["split"] == "test" for r in rows)
+        log.info("NYU prepared: %d samples (%d train, %d test) -> %s",
+                 len(rows), len(rows) - n_test, n_test, index)
+        return index
