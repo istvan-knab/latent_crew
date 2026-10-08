@@ -24,6 +24,33 @@ log = get_logger(__name__)
 SEED = 0
 # PIL image mode -> numpy dtype of the pixel values
 MODE_DTYPES = {"RGB": "uint8", "L": "uint8", "I;16": "uint16", "I": "int32", "F": "float32"}
+PERCENTILES = (1, 5, 25, 50, 75, 95, 99)
+# Thresholds for suspicious RGB images, on the 0-1 scale
+RGB_DARK_MEAN = 0.1
+RGB_BRIGHT_MEAN = 0.9
+RGB_LOW_STD = 0.02
+# Sample ids listed per issue in the report (all of them go to self.problems)
+EXAMPLES = 10
+
+
+def _hist_stats(hist: np.ndarray) -> dict:
+    """Exact statistics of one uint8 channel from its 256-bin histogram, on the 0-1 scale."""
+    n = hist.sum()
+    if n == 0:
+        return {}
+    v = np.arange(256) / 255
+    mean = (v * hist).sum() / n
+    std = np.sqrt(((v - mean) ** 2 * hist).sum() / n)
+    nonzero = np.flatnonzero(hist)
+    cdf = np.cumsum(hist) / n
+    return {
+        "mean": round(float(mean), 4),
+        "std": round(float(std), 4),
+        "min": round(float(nonzero[0]) / 255, 4),
+        "max": round(float(nonzero[-1]) / 255, 4),
+        "percentiles": {str(p): round(int(np.searchsorted(cdf, p / 100)) / 255, 4)
+                        for p in PERCENTILES},
+    }
 
 
 class DataEvaluator:
@@ -167,7 +194,73 @@ class DataEvaluator:
         }
 
     def evaluate_rgb(self, dataset: str) -> dict:
-        return {}  # TODO
+        """Channel statistics and dark, bright, low-contrast or broken RGB images."""
+        start = time.perf_counter()
+        out = self.cfg.processed / dataset
+        rows = self._subset(self._load_index(dataset))
+
+        # Per-sensor histograms: 3 channels x 256 values, exact for uint8 images
+        hists: dict[str, np.ndarray] = {}
+        sensor_samples = Counter()
+        brightness = []
+        flagged = {k: [] for k in ("dark", "bright", "low_contrast", "bad_channels",
+                                   "unreadable")}
+
+        def flag(kind: str, sample_id: str, message: str) -> None:
+            flagged[kind].append(sample_id)
+            self._problem(dataset, sample_id, "rgb", message)
+
+        for r in tqdm(rows, desc=f"RGB {dataset}", unit="sample"):
+            try:
+                with Image.open(out / r["rgb"]) as img:
+                    a = np.asarray(img)
+            except OSError as e:
+                flag("unreadable", r["id"], f"unreadable rgb: {e}")
+                continue
+            if a.ndim != 3 or a.shape[2] != 3:
+                flag("bad_channels", r["id"], f"rgb shape {a.shape}, expected (H, W, 3)")
+                continue
+
+            px = a.reshape(-1, 3)
+            h = hists.setdefault(r["sensor"], np.zeros((3, 256), np.int64))
+            for c in range(3):
+                h[c] += np.bincount(px[:, c], minlength=256)
+            sensor_samples[r["sensor"]] += 1
+
+            mean, std = px.mean() / 255, px.std() / 255
+            brightness.append(mean)
+            if mean < RGB_DARK_MEAN:
+                flag("dark", r["id"], f"dark image (mean {mean:.3f})")
+            elif mean > RGB_BRIGHT_MEAN:
+                flag("bright", r["id"], f"bright image (mean {mean:.3f})")
+            if std < RGB_LOW_STD:
+                flag("low_contrast", r["id"], f"low contrast image (std {std:.3f})")
+
+        total = sum(hists.values()) if hists else np.zeros((3, 256), np.int64)
+        by_sensor = {}
+        for sensor, h in sorted(hists.items()):
+            stats = [_hist_stats(h[c]) for c in range(3)]
+            by_sensor[sensor] = {
+                "samples": sensor_samples[sensor],
+                "mean": [s["mean"] for s in stats],
+                "std": [s["std"] for s in stats],
+            }
+        return {
+            "checked_samples": len(rows),
+            "scale": "0-1 (pixel value / 255)",
+            "thresholds": {"dark_mean": RGB_DARK_MEAN, "bright_mean": RGB_BRIGHT_MEAN,
+                           "low_contrast_std": RGB_LOW_STD},
+            "channels": {name: _hist_stats(total[c]) for c, name in enumerate("RGB")},
+            "brightness": {
+                "min": round(float(min(brightness)), 4),
+                "mean": round(float(np.mean(brightness)), 4),
+                "max": round(float(max(brightness)), 4),
+            } if brightness else {},
+            "by_sensor": by_sensor,
+            "flagged": {k: {"count": len(ids), "examples": ids[:EXAMPLES]}
+                        for k, ids in flagged.items()},
+            "runtime_s": round(time.perf_counter() - start, 1),
+        }
 
     def evaluate_depth(self, dataset: str) -> dict:
         return {}  # TODO

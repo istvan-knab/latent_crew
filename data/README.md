@@ -57,7 +57,7 @@ Measured on one machine, only as a rough guide:
 | `--prepare` NYU, first run | ~1.5 min |
 | `--prepare` SUN, first run | ~11 min |
 | Full run when everything is already prepared | ~30 s |
-| `data_evaluation.py`, all samples (structure only) | ~35 s |
+| `data_evaluation.py`, all samples (structure, rgb) | ~2.5 min |
 
 ## Layout
 
@@ -131,7 +131,7 @@ One JSON object per line. All paths are relative to `processed/<dataset>/`.
 |---|---|---|
 | program | done | git commit, Python, numpy and Pillow versions |
 | `structure` | done | name, version, source files and SHA-256, disk usage, sample counts and train ratio, index duplicates, missing files and incomplete samples, format / dtype / resolution per field, unreadable files |
-| `rgb` | TODO | channel statistics, dark / bright / constant images |
+| `rgb` | done | per-channel mean, std, min, max and percentiles (0-1 scale, exact from histograms), image brightness, per-sensor means, dark / bright / low-contrast / broken images (flagged, not removed) |
 | `depth` | TODO | depth statistics, invalid pixels, raw vs. filled |
 | `labels` | TODO | class frequencies, instances, rare classes |
 | `alignment` | TODO | scene and sensor distribution, train/test overlap |
