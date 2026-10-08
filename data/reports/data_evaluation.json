@@ -1,21 +1,230 @@
 {
-  "created": "2026-10-08T11:04:50",
-  "sample_limit": 100,
+  "created": "2026-10-08T13:01:24",
+  "program": {
+    "git_commit": "9c3aee2",
+    "python": "3.14.8",
+    "numpy": "2.5.3",
+    "pillow": "12.3.0"
+  },
+  "sample_limit": 50,
   "datasets": {
     "sunrgbd": {
-      "structure": {},
+      "structure": {
+        "name": "SUN RGB-D",
+        "version": "V1",
+        "source_files": [
+          {
+            "file": "SUNRGBD.zip",
+            "size_bytes": 6885481608,
+            "sha256": "1a6dbf2a1c9044c4805a35ee648d616ea39a231fd5bd6f77e84cd2b8287fe41c"
+          },
+          {
+            "file": "SUNRGBDtoolbox.zip",
+            "size_bytes": 570324301,
+            "sha256": "946ee4dada878d508bcc0b754066c6d20e80160563d0277782cddaaee7b6e193"
+          },
+          {
+            "file": "SUNRGBDMeta2DBB_v2.mat",
+            "size_bytes": 4300305,
+            "sha256": "d42020e95c6b654b2c81f0e04c8dba615b98733075e0c8605e6bd43bbb9b2899"
+          },
+          {
+            "file": "SUNRGBDMeta3DBB_v2.mat",
+            "size_bytes": 9873056,
+            "sha256": "0f8c97ab95630d2461212ffc9589facb8cf3444cafab4c6d93d97541b347e36b"
+          }
+        ],
+        "disk_usage": {
+          "downloads_bytes": 7469979270,
+          "downloads": "7.0 GiB",
+          "processed_bytes": 3359985496,
+          "processed": "3.1 GiB"
+        },
+        "samples": {
+          "total": 10335,
+          "train": 5285,
+          "test": 5050,
+          "train_ratio": 0.511
+        },
+        "index_issues": {
+          "duplicate_ids": 0,
+          "duplicate_paths": 0,
+          "unknown_split": 0
+        },
+        "missing_files": {},
+        "incomplete_samples": 0,
+        "checked_samples": 50,
+        "files": {
+          "rgb": {
+            "format": {
+              "JPEG": 50
+            },
+            "dtype": {
+              "uint8": 50
+            },
+            "resolution": {
+              "730x530": 19,
+              "561x427": 9,
+              "591x441": 15,
+              "681x531": 7
+            }
+          },
+          "depth": {
+            "format": {
+              "PNG": 50
+            },
+            "dtype": {
+              "uint16": 50
+            },
+            "resolution": {
+              "730x530": 19,
+              "561x427": 9,
+              "591x441": 15,
+              "681x531": 7
+            }
+          },
+          "depth_raw": {
+            "format": {
+              "PNG": 50
+            },
+            "dtype": {
+              "uint16": 50
+            },
+            "resolution": {
+              "730x530": 19,
+              "561x427": 9,
+              "591x441": 15,
+              "681x531": 7
+            }
+          },
+          "semantic": {
+            "format": {
+              "PNG": 50
+            },
+            "dtype": {
+              "uint8": 50
+            },
+            "resolution": {
+              "730x530": 19,
+              "561x427": 9,
+              "591x441": 15,
+              "681x531": 7
+            }
+          },
+          "instance": {
+            "format": {
+              "PNG": 50
+            },
+            "dtype": {
+              "uint16": 50
+            },
+            "resolution": {
+              "730x530": 19,
+              "561x427": 9,
+              "591x441": 15,
+              "681x531": 7
+            }
+          }
+        },
+        "unreadable_files": {},
+        "runtime_s": 2.1
+      },
       "rgb": {},
       "depth": {},
       "labels": {},
       "alignment": {}
     },
     "nyu_depth_v2": {
-      "structure": {},
+      "structure": {
+        "name": "NYU Depth V2",
+        "version": "labeled",
+        "source_files": [
+          {
+            "file": "nyu_depth_v2_labeled.mat",
+            "size_bytes": 2972037809,
+            "sha256": "2d724b0c0ab358aa1ce5df855e5bd14a2279ab7202efe22f32a30d612dcb86aa"
+          },
+          {
+            "file": "splits.mat",
+            "size_bytes": 2626,
+            "sha256": "6e081404491a8bfba2f066beaa9713ef6046f9007aa5f799f2a350506a580cee"
+          }
+        ],
+        "disk_usage": {
+          "downloads_bytes": 2972040435,
+          "downloads": "2.8 GiB",
+          "processed_bytes": 449901136,
+          "processed": "429.1 MiB"
+        },
+        "samples": {
+          "total": 1449,
+          "train": 795,
+          "test": 654,
+          "train_ratio": 0.549
+        },
+        "index_issues": {
+          "duplicate_ids": 0,
+          "duplicate_paths": 0,
+          "unknown_split": 0
+        },
+        "missing_files": {},
+        "incomplete_samples": 0,
+        "checked_samples": 50,
+        "files": {
+          "rgb": {
+            "format": {
+              "JPEG": 50
+            },
+            "dtype": {
+              "uint8": 50
+            },
+            "resolution": {
+              "640x480": 50
+            }
+          },
+          "depth": {
+            "format": {
+              "PNG": 50
+            },
+            "dtype": {
+              "uint16": 50
+            },
+            "resolution": {
+              "640x480": 50
+            }
+          },
+          "semantic": {
+            "format": {
+              "PNG": 50
+            },
+            "dtype": {
+              "uint16": 50
+            },
+            "resolution": {
+              "640x480": 50
+            }
+          },
+          "instance": {
+            "format": {
+              "PNG": 50
+            },
+            "dtype": {
+              "uint8": 50
+            },
+            "resolution": {
+              "640x480": 50
+            }
+          }
+        },
+        "unreadable_files": {},
+        "runtime_s": 0.2
+      },
       "rgb": {},
       "depth": {},
       "labels": {},
       "alignment": {}
     }
   },
-  "runtime_s": 0.0
+  "problematic_samples": 0,
+  "runtime_s": 2.4
 }

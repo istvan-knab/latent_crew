@@ -1,6 +1,6 @@
 # Data
 
-Download, verification and preparation of the SUN RGB-D and NYU Depth V2 datasets.
+Download, verification and preparation of the SUN RGB-D (V1) and NYU Depth V2 (labeled) datasets.
 
 ## Setup
 
@@ -8,27 +8,56 @@ Download, verification and preparation of the SUN RGB-D and NYU Depth V2 dataset
 pip install -r data/requirements.txt
 ```
 
+`scipy` is pinned below 1.18, because Windows Smart App Control blocks 1.18.x.
+
 ## Usage
 
-Download, verify and extract both datasets:
+Run all commands from the repository root.
+
+Download, verify, extract and prepare both datasets with one command:
 
 ```
-python data/scripts/collect_data.py --datasets sunrgbd nyu_depth_v2 --verify --extract --prepare
+python data/scripts/collect_data.py --datasets sunrgbd nyu_depth_v2
 ```
 
-Verify existing files only:
+With no step flag (`--verify`, `--extract`, `--prepare`), every step runs; with flags, only the given steps run.
+
+| Flag | Effect |
+|---|---|
+| `--datasets` | Datasets to process (default: `[collect].datasets` in `config.toml`) |
+| `--verify` | Check size and SHA-256 of downloads, then the dataset structure |
+| `--extract` | Extract archives into `raw/` |
+| `--prepare` | Write `processed/<dataset>/` and `index.jsonl` |
+| `--verify-only` | Check downloads, dataset structure and index; writes nothing |
+| `--force` | Download and extract again |
+| `--include-raw-nyu` | Full raw NYU (~428 GB); not supported yet, only logs a warning |
+
+Behaviour:
+
+- **Idempotent**: a second run downloads, extracts and converts nothing that is already there; it only fills in missing files.
+- **Resumable**: an interrupted download continues from its `.part` file.
+- **Atomic**: every output is written to a temporary file first, so no half-written files are left behind.
+- **Errors**: a failed check prints `ERROR: ...` and exits with code 1.
+- `raw/` is never modified; all conversions go to `processed/`.
+
+Evaluate the prepared data (quick test on 50 samples; omit the flag for all samples):
 
 ```
-python data/scripts/collect_data.py --datasets sunrgbd nyu_depth_v2 --verify-only
+python data/scripts/data_evaluation.py --sample-limit 50
 ```
 
-Evaluate the prepared data (quick test on 100 samples):
+All parameters are in `config.toml`, download sources (URL, size, SHA-256) in `manifests/datasets.json`.
 
-```
-python data/scripts/data_evaluation.py --sample-limit 100
-```
+### Run times
 
-All parameters are in `config.toml`, download sources in `manifests/datasets.json`.
+Measured on one machine, only as a rough guide:
+
+| Step | Time |
+|---|---|
+| `--prepare` NYU, first run | ~1.5 min |
+| `--prepare` SUN, first run | ~11 min |
+| Full run when everything is already prepared | ~30 s |
+| `data_evaluation.py`, all samples (structure only) | ~35 s |
 
 ## Layout
 
@@ -37,8 +66,72 @@ All parameters are in `config.toml`, download sources in `manifests/datasets.jso
 | `downloads/` | Downloaded archives (not in Git) |
 | `raw/` | Extracted, unmodified official data (not in Git) |
 | `processed/` | Training-ready data and `index.jsonl` (not in Git) |
-| `reports/` | Run summaries and evaluation reports |
+| `reports/` | Run summary (`collect_summary.json`) and evaluation reports |
 | `src/` | Library code (`DataCollector`, `DataEvaluator`) |
-| `scripts/` | Command-line entry points |
+| `scripts/` | Command-line entry points; `inspect_mat.py` and `inspect_sun.py` are debugging helpers |
 
-Needs about 30 GB of free disk space.
+The collector needs `min_free_space_gb` (40 GB) of free disk space. Actual usage: downloads 9.8 GiB (SUN 7.0, NYU 2.8), processed 3.5 GiB (SUN 3.1, NYU 0.4).
+
+## Processed data
+
+```
+processed/<dataset>/
+  index.jsonl
+  classes.json
+  train/{rgb,depth,depth_raw,semantic,instance}/<id>.<ext>
+  test/...
+```
+
+| Dataset | Samples | Train | Test | Resolution (W×H) |
+|---|---|---|---|---|
+| `sunrgbd` | 10335 | 5285 | 5050 | per sensor: kv2 730×530, xtion 591×441, kv1 561×427, realsense 681×531 |
+| `nyu_depth_v2` | 1449 | 795 | 654 | 640×480 |
+
+Splits are the official ones (`allsplit.mat` for SUN, `splits.mat` for NYU). File names are the original sample numbers (1-based), so e.g. NYU `train/` starts at `000003`.
+
+### Index fields
+
+One JSON object per line. All paths are relative to `processed/<dataset>/`.
+
+```
+{"id": "sun_000001", "dataset": "sunrgbd", "split": "test",
+ "rgb": "test/rgb/000001.jpg", "depth": "test/depth/000001.png",
+ "depth_raw": "test/depth_raw/000001.png", "semantic": "test/semantic/000001.png",
+ "instance": "test/instance/000001.png", "scene": "furniture_store",
+ "sensor": "kinect_v2", "source": "SUNRGBD/kv2/kinect2data/..."}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | `sun_NNNNNN` or `nyu_NNNNNN` |
+| `split` | `train` or `test` |
+| `rgb`, `depth`, `semantic`, `instance` | Image paths |
+| `depth_raw` | SUN only: raw sensor depth (holes = 0) |
+| `scene` | Scene type (`unknown` if missing) |
+| `sensor` | `kinect_v1`, `kinect_v2`, `realsense` or `xtion` |
+| `source` | SUN only: original sample folder under `raw/sunrgbd/` |
+
+### File formats
+
+| Field | Format | SUN RGB-D | NYU Depth V2 |
+|---|---|---|---|
+| `rgb` | JPEG | uint8, copied unchanged | uint8, quality 95 |
+| `depth` | PNG | uint16, mm, hole-filled (`depth_bfx`) | uint16, mm, hole-filled |
+| `depth_raw` | PNG | uint16, mm, 0 = no measurement | – |
+| `semantic` | PNG | **uint8**, 37 classes | **uint16**, 894 classes |
+| `instance` | PNG | **uint16** | **uint8** |
+
+`classes.json` is `["unlabeled", ...names]`: label 0 means unlabeled, label k is `classes[k]`. Note that the semantic and instance dtypes are swapped between the two datasets, and the class sets differ (37 vs 894), so joint training needs a common class mapping.
+
+## Evaluation report
+
+`data_evaluation.py` reads the same `index.jsonl` as training and writes `reports/data_evaluation.json` and `reports/data_evaluation.md`. `--sample-limit N` checks N samples picked at random with a fixed seed, so repeated runs check the same samples; counts and missing-file checks always use the full index.
+
+| Part | Status | Content |
+|---|---|---|
+| program | done | git commit, Python, numpy and Pillow versions |
+| `structure` | done | name, version, source files and SHA-256, disk usage, sample counts and train ratio, index duplicates, missing files and incomplete samples, format / dtype / resolution per field, unreadable files |
+| `rgb` | TODO | channel statistics, dark / bright / constant images |
+| `depth` | TODO | depth statistics, invalid pixels, raw vs. filled |
+| `labels` | TODO | class frequencies, instances, rare classes |
+| `alignment` | TODO | scene and sensor distribution, train/test overlap |
