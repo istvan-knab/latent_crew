@@ -10,7 +10,7 @@
         "kind": "zip",
         "raw": "sunrgbd",
         "size_bytes": 6885481608,
-        "sha256": null
+        "sha256": "1a6dbf2a1c9044c4805a35ee648d616ea39a231fd5bd6f77e84cd2b8287fe41c"
       },
       {
         "id": "sunrgbd_toolbox",
@@ -28,7 +28,7 @@
         "kind": "file",
         "raw": "sunrgbd/metadata",
         "size_bytes": 4300305,
-        "sha256": null
+        "sha256": "d42020e95c6b654b2c81f0e04c8dba615b98733075e0c8605e6bd43bbb9b2899"
       },
       {
         "id": "sunrgbd_meta3d",
@@ -37,7 +37,7 @@
         "kind": "file",
         "raw": "sunrgbd/metadata",
         "size_bytes": 9873056,
-        "sha256": null
+        "sha256": "0f8c97ab95630d2461212ffc9589facb8cf3444cafab4c6d93d97541b347e36b"
       }
     ]
   },
@@ -52,7 +52,7 @@
         "kind": "file",
         "raw": "nyu_depth_v2",
         "size_bytes": 2972037809,
-        "sha256": null
+        "sha256": "2d724b0c0ab358aa1ce5df855e5bd14a2279ab7202efe22f32a30d612dcb86aa"
       },
       {
         "id": "nyu_splits",
@@ -61,7 +61,7 @@
         "kind": "file",
         "raw": "nyu_depth_v2",
         "size_bytes": 2626,
-        "sha256": null
+        "sha256": "6e081404491a8bfba2f066beaa9713ef6046f9007aa5f799f2a350506a580cee"
       }
     ]
   }

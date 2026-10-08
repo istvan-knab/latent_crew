@@ -6,11 +6,13 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+import h5py
 import requests
+import scipy.io
 from tqdm import tqdm
 
 from .config import load_config
-from .extractors import safe_extract_zip
+from .extractors import read_nyu_sample, safe_extract_zip
 from .utils import free_space_bytes, get_logger, human_size, sha256_of
 from .validators import ValidationError, check_mat, check_size, check_zip
 
@@ -185,8 +187,47 @@ class DataCollector:
         marker.write_text("ok\n", encoding="utf-8")
 
     def verify_dataset(self, dataset: str) -> dict:
+        """Dataset-specific structure checks; raises ValidationError on problems."""
+        if dataset == "nyu_depth_v2":
+            return self._verify_nyu()
         log.warning("verify_dataset is not implemented yet, skipping: %s", dataset)
         return {}
+
+    def _verify_nyu(self) -> dict:
+        raw = self.cfg.raw / "nyu_depth_v2"
+        mat_path, splits_path = raw / "nyu_depth_v2_labeled.mat", raw / "splits.mat"
+        for path in (mat_path, splits_path):
+            if not path.exists():
+                raise ValidationError(f"Missing file: {path}")
+
+        with h5py.File(mat_path, "r") as f:
+            fields = ["images", "depths", "labels", "instances", "names", "scenes"]
+            missing = [k for k in fields if k not in f]
+            if missing:
+                raise ValidationError(f"{mat_path.name}: missing fields {missing}")
+
+            counts = {k: f[k].shape[0] for k in fields[:4]}
+            if len(set(counts.values())) != 1:
+                raise ValidationError(f"{mat_path.name}: sample counts differ {counts}")
+            n = counts["images"]
+
+            # Fully decode a few samples and check that the shapes match
+            for i in (0, n // 2, n - 1):
+                s = read_nyu_sample(f, i)
+                shapes = {k: v.shape[:2] for k, v in s.items()}
+                if len(set(shapes.values())) != 1:
+                    raise ValidationError(f"NYU sample {i}: shape mismatch {shapes}")
+
+        splits = scipy.io.loadmat(splits_path)
+        train = set(splits["trainNdxs"].ravel())
+        test = set(splits["testNdxs"].ravel())
+        if train & test:
+            raise ValidationError("NYU train/test splits overlap")
+        if train | test != set(range(1, n + 1)):
+            raise ValidationError("NYU splits do not cover every sample exactly once")
+
+        log.info("NYU OK: %d samples (%d train, %d test)", n, len(train), len(test))
+        return {"samples": n, "train": len(train), "test": len(test)}
 
     def prepare_dataset(self, dataset: str) -> Path:
         raise NotImplementedError
