@@ -1,5 +1,5 @@
 numpy
-scipy
+scipy<1.18  # 1.18.x blocked by Windows Smart App Control
 h5py
 Pillow
 tqdm

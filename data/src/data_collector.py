@@ -1,12 +1,15 @@
 """DataCollector: az adathalmazok letöltése, ellenőrzése és előkészítése."""
 import json
+import shutil
 import time
+import zipfile
 from pathlib import Path
 
 import requests
 from tqdm import tqdm
 
 from .config import load_config
+from .extractors import safe_extract_zip
 from .utils import get_logger, sha256_of
 from .validators import ValidationError, check_mat, check_size, check_zip
 
@@ -102,7 +105,22 @@ class DataCollector:
         log.info("Rendben: %s", target.name)
         
     def extract_archive(self, archive: Path, destination: Path) -> None:
-        raise NotImplementedError
+        """Extract a ZIP (or copy a plain file) into raw/."""
+        archive, destination = Path(archive), Path(destination)
+        # Marker is written last, so it only exists after a complete run
+        marker = destination / f".done_{archive.name}"
+        if marker.exists():
+            log.info("Already extracted, skipping: %s", archive.name)
+            return
+
+        destination.mkdir(parents=True, exist_ok=True)
+        if zipfile.is_zipfile(archive):
+            count = safe_extract_zip(archive, destination)
+            log.info("Extracted: %s (%d members)", archive.name, count)
+        else:
+            shutil.copy2(archive, destination / archive.name)
+            log.info("Copied: %s", archive.name)
+        marker.write_text("ok\n", encoding="utf-8")
 
     def verify_dataset(self, dataset: str) -> dict:
         raise NotImplementedError
