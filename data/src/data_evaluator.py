@@ -1,6 +1,7 @@
 """DataEvaluator: statistics and quality report for the prepared datasets."""
 import hashlib
 import json
+import os
 import platform
 import random
 import subprocess
@@ -18,7 +19,7 @@ from tqdm import tqdm
 from .config import load_config
 from .data_collector import PATH_KEYS
 from .extractors import sun_key
-from .utils import get_logger, human_size
+from .utils import get_logger, human_size, sha256_of
 from .validators import ValidationError
 
 log = get_logger(__name__)
@@ -54,6 +55,9 @@ MIN_DEPTH_EDGES = 500
 # Near duplicates: 256-bit difference hashes (16x16) at most this many bits apart
 HASH_SIZE = 16
 NEAR_DUP_BITS = 10
+# Issue kinds that mean broken data (exit code 1); all other kinds are warnings
+ERROR_KINDS = {"missing", "unreadable", "bad_format", "bad_channels", "bad_values",
+               "size_mismatch", "duplicate_id", "duplicate_path", "unknown_split"}
 # Sample ids listed per issue in the report (all of them go to self.problems)
 EXAMPLES = 10
 
@@ -200,9 +204,23 @@ class DataEvaluator:
                 "labels": self.evaluate_labels(name),
                 "alignment": self.evaluate_alignment(name),
             }
+        result["summary"] = {name: self._dataset_summary(name, parts)
+                             for name, parts in result["datasets"].items()}
         result["problematic_samples"] = len(self.problems)
+        result["errors"] = sum(s["errors"] for s in result["summary"].values())
         result["runtime_s"] = round(time.perf_counter() - start, 1)
         return result
+
+    def _dataset_summary(self, dataset: str, parts: dict) -> dict:
+        """Sample counts and the number of flagged samples, with errors and with warnings."""
+        mine = [p for p in self.problems if p["dataset"] == dataset]
+        samples = parts["structure"]["samples"]
+        return {
+            "samples": samples["total"], "train": samples["train"], "test": samples["test"],
+            "flagged_samples": len({p["id"] for p in mine}),
+            "errors": len({p["id"] for p in mine if p["severity"] == "error"}),
+            "warnings": len({p["id"] for p in mine if p["severity"] == "warning"}),
+        }
 
     def _program_info(self) -> dict:
         """Code and library versions, so a report can be traced back to its source."""
@@ -214,7 +232,9 @@ class DataEvaluator:
         except (OSError, subprocess.CalledProcessError):
             commit = "unknown"
         return {"git_commit": commit, "python": platform.python_version(),
-                "numpy": np.__version__, "pillow": PIL.__version__}
+                "numpy": np.__version__, "pillow": PIL.__version__,
+                "manifest": self.cfg.manifest.relative_to(self.data_root).as_posix(),
+                "manifest_sha256": sha256_of(self.cfg.manifest)}
 
     def _load_index(self, dataset: str) -> list[dict]:
         """Rows of processed/<dataset>/index.jsonl (cached)."""
@@ -234,9 +254,16 @@ class DataEvaluator:
         picked = random.Random(SEED).sample(range(len(rows)), self.sample_limit)
         return [rows[i] for i in sorted(picked)]
 
-    def _problem(self, dataset: str, sample_id: str, check: str, message: str) -> None:
-        self.problems.append(
-            {"dataset": dataset, "id": sample_id, "check": check, "message": message})
+    def _problem(self, dataset: str, sample_id: str, check: str, kind: str,
+                 message: str) -> None:
+        severity = "error" if kind in ERROR_KINDS else "warning"
+        # Keep messages machine-independent: paths relative to processed/
+        # (error texts may quote the path as a repr, with doubled backslashes)
+        prefix = str(self.cfg.processed) + os.sep
+        for p in (prefix, prefix.encode("unicode_escape").decode()):
+            message = message.replace(p, "")
+        self.problems.append({"dataset": dataset, "id": sample_id, "check": check,
+                              "kind": kind, "severity": severity, "message": message})
 
     def evaluate_structure(self, dataset: str) -> dict:
         """File counts, splits, missing or unreadable files, formats and resolutions."""
@@ -251,6 +278,17 @@ class DataEvaluator:
         ids = Counter(r["id"] for r in rows)
         paths = Counter(r[k] for r in rows for k in PATH_KEYS if k in r)
         unknown_split = [r["id"] for r in rows if r["split"] not in ("train", "test")]
+        for sample_id in unknown_split:
+            self._problem(dataset, sample_id, "structure", "unknown_split", "unknown split")
+        for sample_id, c in ids.items():
+            if c > 1:
+                self._problem(dataset, sample_id, "structure", "duplicate_id",
+                              f"id used by {c} index rows")
+        for r in rows:
+            shared = [r[k] for k in PATH_KEYS if k in r and paths[r[k]] > 1]
+            if shared:
+                self._problem(dataset, r["id"], "structure", "duplicate_path",
+                              f"paths shared with other samples: {shared}")
 
         missing, incomplete = Counter(), 0
         for r in tqdm(rows, desc=f"Checking {dataset} files", unit="sample"):
@@ -258,7 +296,8 @@ class DataEvaluator:
             missing.update(gone)
             if gone:
                 incomplete += 1
-                self._problem(dataset, r["id"], "structure", f"missing files: {gone}")
+                self._problem(dataset, r["id"], "structure", "missing",
+                              f"missing files: {gone}")
 
         # Formats from the file headers only (pixels are decoded in the other checks)
         subset = self._subset(rows)
@@ -277,10 +316,12 @@ class DataEvaluator:
                         stats["resolution"][f"{img.width}x{img.height}"] += 1
                 except OSError as e:
                     unreadable[k] += 1
-                    self._problem(dataset, r["id"], "structure", f"unreadable {k}: {e}")
+                    self._problem(dataset, r["id"], "structure", "unreadable",
+                                  f"unreadable {k}: {e}")
 
         downloads = sum(f["size_bytes"] for f in spec["files"])
-        processed = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
+        processed_files = [p for p in out.rglob("*") if p.is_file()]
+        processed = sum(p.stat().st_size for p in processed_files)
         return {
             "name": spec["name"],
             "version": spec["version"],
@@ -292,6 +333,7 @@ class DataEvaluator:
             "disk_usage": {
                 "downloads_bytes": downloads, "downloads": human_size(downloads),
                 "processed_bytes": processed, "processed": human_size(processed),
+                "processed_files": len(processed_files),
             },
             "samples": {
                 "total": n, "train": splits["train"], "test": splits["test"],
@@ -325,7 +367,7 @@ class DataEvaluator:
 
         def flag(kind: str, sample_id: str, message: str) -> None:
             flagged[kind].append(sample_id)
-            self._problem(dataset, sample_id, "rgb", message)
+            self._problem(dataset, sample_id, "rgb", kind, message)
 
         for r in tqdm(rows, desc=f"RGB {dataset}", unit="sample"):
             try:
@@ -394,7 +436,7 @@ class DataEvaluator:
 
         def flag(kind: str, sample_id: str, message: str) -> None:
             flagged[kind].append(sample_id)
-            self._problem(dataset, sample_id, "depth", message)
+            self._problem(dataset, sample_id, "depth", kind, message)
 
         for r in tqdm(rows, desc=f"Depth {dataset}", unit="sample"):
             maps = {}
@@ -499,7 +541,7 @@ class DataEvaluator:
 
         def flag(kind: str, sample_id: str, message: str) -> None:
             flagged[kind].append(sample_id)
-            self._problem(dataset, sample_id, "labels", message)
+            self._problem(dataset, sample_id, "labels", kind, message)
 
         for r in tqdm(rows, desc=f"Labels {dataset}", unit="sample"):
             maps = {}
@@ -657,7 +699,7 @@ class DataEvaluator:
 
         def flag(kind: str, sample_id: str, message: str) -> None:
             flagged[kind].append(sample_id)
-            self._problem(dataset, sample_id, "alignment", message)
+            self._problem(dataset, sample_id, "alignment", kind, message)
 
         shifts, scores, hashes, dhashes, splits, ids = Counter(), [], {}, [], [], []
         sensor_dist: dict[str, Counter] = {}
@@ -764,17 +806,143 @@ class DataEvaluator:
         return result
 
     def write_reports(self, result: dict, output_dir: Path | None = None) -> None:
-        """Write the full JSON report and a short Markdown summary."""
+        """Write the JSON report, the Markdown summary and problematic_samples.jsonl."""
         out = Path(output_dir) if output_dir else self.cfg.reports
         out.mkdir(parents=True, exist_ok=True)
-        (out / "data_evaluation.json").write_text(
-            json.dumps(result, indent=2), encoding="utf-8"
-        )
-        lines = ["# Data evaluation", "", f"Created: {result['created']}", ""]
-        for name, parts in result["datasets"].items():
-            lines.append(f"## {name}")
-            for part, values in parts.items():
-                lines.append(f"- **{part}**: {len(values)} metrics")
-            lines.append("")
-        (out / "data_evaluation.md").write_text("\n".join(lines), encoding="utf-8")
+        _write_text(out / "data_evaluation.json", json.dumps(result, indent=2))
+        _write_text(out / "data_evaluation.md", _markdown(result))
+        _write_text(out / "problematic_samples.jsonl",
+                    "".join(json.dumps(p) + "\n" for p in self.problems))
         log.info("Reports written to %s", out)
+
+
+def _write_text(path: Path, text: str) -> None:
+    """Write via a temp file, so a report is never half-written."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _table(header: list, rows: list[list]) -> list[str]:
+    """Markdown table lines."""
+    lines = ["| " + " | ".join(str(h) for h in header) + " |", "|" + "---|" * len(header)]
+    lines += ["| " + " | ".join(str(v) for v in row) + " |" for row in rows]
+    return lines + [""]
+
+
+def _pct(value: float | None) -> str:
+    return "-" if value is None else f"{100 * value:.1f} %"
+
+
+def _flag_rows(parts: dict) -> list[list]:
+    """One row per flagged issue kind with a non-zero count."""
+    rows = []
+    for part, values in parts.items():
+        for kind, v in values.get("flagged", {}).items():
+            if v["count"]:
+                severity = "error" if kind in ERROR_KINDS else "warning"
+                rows.append([part, kind, severity, v["count"], ", ".join(v["examples"][:3])])
+    return rows
+
+
+def _markdown(result: dict) -> str:
+    """Human-readable summary of the report; the JSON holds every detail."""
+    prog = result["program"]
+    lines = ["# Data evaluation", "",
+             f"Created {result['created']}, git commit `{prog['git_commit']}`, "
+             f"Python {prog['python']}, numpy {prog['numpy']}, Pillow {prog['pillow']}.  ",
+             f"Manifest `{prog['manifest']}` SHA-256 `{prog['manifest_sha256']}`.  ",
+             f"Samples checked: {result['sample_limit'] or 'all'}. "
+             f"Runtime {result['runtime_s']} s. Full details: `data_evaluation.json`; "
+             f"flagged samples: `problematic_samples.jsonl`.", ""]
+    lines += ["## Summary", ""]
+    lines += _table(["dataset", "samples", "train", "test", "flagged samples", "errors",
+                     "warnings"],
+                    [[name, s["samples"], s["train"], s["test"], s["flagged_samples"],
+                      s["errors"], s["warnings"]] for name, s in result["summary"].items()])
+
+    for name, parts in result["datasets"].items():
+        st, rgb, dep = parts["structure"], parts["rgb"], parts["depth"]
+        lab, al = parts["labels"], parts["alignment"]
+        lines += [f"## {st['name']} ({name})", "",
+                  f"Version {st['version']}. Downloads {st['disk_usage']['downloads']}, "
+                  f"processed {st['disk_usage']['processed']} in "
+                  f"{st['disk_usage']['processed_files']} files. "
+                  f"Train ratio {st['samples']['train_ratio']}.", ""]
+
+        lines += ["### Files", ""]
+        lines += _table(["field", "format", "dtype", "resolutions", "missing", "unreadable"],
+                        [[k, ", ".join(v["format"]), ", ".join(v["dtype"]),
+                          ", ".join(f"{r} ({c})" for r, c in v["resolution"].items()),
+                          st["missing_files"].get(k, 0), st["unreadable_files"].get(k, 0)]
+                         for k, v in st["files"].items()])
+        issues = st["index_issues"]
+        lines += [f"Index: {issues['duplicate_ids']} duplicate ids, "
+                  f"{issues['duplicate_paths']} duplicate paths, "
+                  f"{issues['unknown_split']} unknown splits; "
+                  f"{st['incomplete_samples']} incomplete samples.", ""]
+
+        lines += ["### RGB (0-1 scale)", ""]
+        lines += _table(["channel", "mean", "std", "min", "p1", "median", "p99", "max"],
+                        [[c, v["mean"], v["std"], v["min"], v["percentiles"]["1"],
+                          v["median"], v["percentiles"]["99"], v["max"]]
+                         for c, v in rgb["channels"].items()])
+
+        lines += [f"### Depth ({dep['unit']}, valid pixels)", ""]
+        rows = []
+        for field in ("depth", "depth_raw"):
+            if field not in dep:
+                continue
+            v, r = dep[field]["valid_pixels"], dep[field]["pixel_ratios"]
+            rows.append([field, v["min"], v["percentiles"]["1"], v["median"], v["mean"],
+                         v["std"], v["percentiles"]["99"], v["max"], _pct(r["invalid"]),
+                         _pct(dep[field]["valid_ratio_per_sample"]["mean"])])
+        lines += _table(["field", "min", "p1", "median", "mean", "std", "p99", "max",
+                         "invalid pixels", "valid per sample (mean)"], rows)
+
+        lines += ["### Labels", ""]
+        imb = lab["imbalance"]
+        lines += [f"{lab['num_classes']} classes ({imb['classes_seen']} seen), "
+                  f"unlabelled pixels {_pct(lab['background_ratio'])}, "
+                  f"{lab['per_image']['classes']['mean']:.1f} classes and "
+                  f"{lab['per_image']['instances']['mean']:.1f} instances per image (mean). "
+                  f"{imb['classes_for_90pct_pixels']} classes cover 90 % of labelled pixels; "
+                  f"{len(imb['rare_classes'])} rare classes.", ""]
+        lines += _table(["class", "share of labelled pixels"],
+                        [[c["name"], _pct(c["labelled_ratio"])] for c in imb["top_classes"]])
+        if isinstance(lab["boxes"], dict):
+            lines += _table(["boxes", "images", "boxes", "per image (mean)", "invalid",
+                             "distinct names"],
+                            [[k.upper(), b["images"], b["boxes"],
+                              b["per_image"].get("mean", "-"), b["invalid"],
+                              b["distinct_names"]] for k, b in lab["boxes"].items()])
+
+        lines += ["### Consistency", ""]
+        for key in ("sensors", "scenes"):
+            tab = al[key]
+            lines += _table([key[:-1], "train", "test"],
+                            [[v, c["train"], c["test"]] for v, c in tab["counts"].items()])
+            if tab["train_only"] or tab["test_only"]:
+                lines += [f"Only in train: {', '.join(tab['train_only']) or '-'}. "
+                          f"Only in test: {', '.join(tab['test_only']) or '-'}.", ""]
+        shift = al["rgb_depth_alignment"]
+        per_sensor = shift["best_shift_px_per_sensor"]
+        dists = sorted({d for v in per_sensor.values() for d in v}, key=int)
+        lines += ["Best RGB-depth shift (px), samples per sensor:", ""]
+        lines += _table(["sensor"] + dists,
+                        [[s] + [v.get(d, 0) for d in dists] for s, v in per_sensor.items()])
+        dup = al["duplicates"]
+        lines += [f"Duplicates: {dup['exact_rgb']} exact RGB copies; near duplicates "
+                  f"{dup['near_pairs_within_train']} within train, "
+                  f"{dup['near_pairs_within_test']} within test, "
+                  f"{dup['near_pairs_train_test']} across train/test.", ""]
+        if "nyu_overlap" in al:
+            ov = al["nyu_overlap"]
+            lines += [f"Overlap with NYU Depth V2: {ov['sun_samples_from_nyu']} samples, "
+                      f"split differs for {ov.get('split_differs', '-')}.", ""]
+
+        lines += ["### Flagged samples", ""]
+        flags = _flag_rows(parts)
+        lines += (_table(["check", "issue", "severity", "samples", "examples"], flags)
+                  if flags else ["None.", ""])
+    return "\n".join(lines)

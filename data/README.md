@@ -127,12 +127,12 @@ Depth values in both datasets are capped at 10 m (max 10000 mm) by the original 
 
 ## Evaluation report
 
-`data_evaluation.py` reads the same `index.jsonl` as training and writes `reports/data_evaluation.json` and `reports/data_evaluation.md`. `--sample-limit N` checks N samples picked at random with a fixed seed, so repeated runs check the same samples; counts and missing-file checks always use the full index.
+`data_evaluation.py` reads the same `index.jsonl` as training and writes `reports/data_evaluation.json` and `reports/data_evaluation.md`. `--sample-limit N` checks N samples picked at random with a fixed seed, so repeated runs check the same samples; counts and missing-file checks always use the full index. It also writes `reports/problematic_samples.jsonl` (one flagged issue per line, with `severity` error or warning) and prints a short summary per dataset. The exit code is 1 if any sample has an error (missing, unreadable or malformed file, broken index) or an index is missing; warnings (dark images, little measured depth, misalignment, ...) only go to the report.
 
 | Part | Status | Content |
 |---|---|---|
-| program | done | git commit, Python, numpy and Pillow versions |
-| `structure` | done | name, version, source files and SHA-256, disk usage, sample counts and train ratio, index duplicates, missing files and incomplete samples, format / dtype / resolution per field, unreadable files |
+| program | done | git commit, Python, numpy and Pillow versions, manifest SHA-256 |
+| `structure` | done | name, version, source files and SHA-256, disk usage, processed file count, sample counts and train ratio, index duplicates, missing files and incomplete samples, format / dtype / resolution per field, unreadable files |
 | `rgb` | done | per-channel mean, std, min, max and percentiles (0-1 scale, exact from histograms), image brightness, per-sensor means, dark / bright / low-contrast / broken images (flagged, not removed) |
 | `depth` | done | unit and scale, min / max / mean / median / std and percentiles over valid pixels (exact from histograms), zero / negative / NaN / inf / invalid ratios, valid ratio per sample, implausible values (< 0.1 m, > 10 m), per-sensor means, raw vs. filled difference; samples whose raw depth is less than 50 % measured are flagged |
 | `labels` | done | class count and names, pixel frequency per class, classes per image, instances, unlabeled / ignore ratio, 2D and 3D boxes (SUN), rare classes and imbalance; zero-size 3D boxes are flagged |

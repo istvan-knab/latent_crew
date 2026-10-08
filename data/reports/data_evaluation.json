@@ -1,10 +1,12 @@
 {
-  "created": "2026-10-08T16:02:24",
+  "created": "2026-10-08T16:36:19",
   "program": {
-    "git_commit": "8e20019",
+    "git_commit": "31fe608",
     "python": "3.14.8",
     "numpy": "2.5.3",
-    "pillow": "12.3.0"
+    "pillow": "12.3.0",
+    "manifest": "manifests/datasets.json",
+    "manifest_sha256": "145493b4387a7f806139c500e88d62bbecff33ce05e39eaeb47d418f76c39a01"
   },
   "sample_limit": null,
   "datasets": {
@@ -38,7 +40,8 @@
           "downloads_bytes": 7469979270,
           "downloads": "7.0 GiB",
           "processed_bytes": 3359985496,
-          "processed": "3.1 GiB"
+          "processed": "3.1 GiB",
+          "processed_files": 51677
         },
         "samples": {
           "total": 10335,
@@ -127,7 +130,7 @@
           }
         },
         "unreadable_files": {},
-        "runtime_s": 11.5
+        "runtime_s": 34.9
       },
       "rgb": {
         "checked_samples": 10335,
@@ -279,7 +282,7 @@
             "examples": []
           }
         },
-        "runtime_s": 76.3
+        "runtime_s": 98.2
       },
       "depth": {
         "checked_samples": 10335,
@@ -412,7 +415,7 @@
             "examples": []
           }
         },
-        "runtime_s": 175.5
+        "runtime_s": 140.2
       },
       "labels": {
         "checked_samples": 10335,
@@ -953,7 +956,7 @@
             ]
           }
         },
-        "runtime_s": 123.6
+        "runtime_s": 77.6
       },
       "alignment": {
         "checked_samples": 10335,
@@ -1290,7 +1293,7 @@
             "labels": 11
           }
         },
-        "runtime_s": 310.5
+        "runtime_s": 209.9
       }
     },
     "nyu_depth_v2": {
@@ -1313,7 +1316,8 @@
           "downloads_bytes": 2972040435,
           "downloads": "2.8 GiB",
           "processed_bytes": 648698517,
-          "processed": "618.6 MiB"
+          "processed": "618.6 MiB",
+          "processed_files": 7247
         },
         "samples": {
           "total": 1449,
@@ -1387,7 +1391,7 @@
           }
         },
         "unreadable_files": {},
-        "runtime_s": 6.5
+        "runtime_s": 5.6
       },
       "rgb": {
         "checked_samples": 1449,
@@ -1492,7 +1496,7 @@
             "examples": []
           }
         },
-        "runtime_s": 19.1
+        "runtime_s": 13.4
       },
       "depth": {
         "checked_samples": 1449,
@@ -1613,7 +1617,7 @@
             "examples": []
           }
         },
-        "runtime_s": 23.4
+        "runtime_s": 17.6
       },
       "labels": {
         "checked_samples": 1449,
@@ -10602,7 +10606,7 @@
             "examples": []
           }
         },
-        "runtime_s": 13.0
+        "runtime_s": 10.5
       },
       "alignment": {
         "checked_samples": 1449,
@@ -10815,10 +10819,29 @@
             "rgb": 2
           }
         },
-        "runtime_s": 45.3
+        "runtime_s": 35.1
       }
     }
   },
+  "summary": {
+    "sunrgbd": {
+      "samples": 10335,
+      "train": 5285,
+      "test": 5050,
+      "flagged_samples": 652,
+      "errors": 0,
+      "warnings": 652
+    },
+    "nyu_depth_v2": {
+      "samples": 1449,
+      "train": 795,
+      "test": 654,
+      "flagged_samples": 58,
+      "errors": 0,
+      "warnings": 58
+    }
+  },
   "problematic_samples": 713,
-  "runtime_s": 804.9
+  "errors": 0,
+  "runtime_s": 643.1
 }
