@@ -1,0 +1,21 @@
+{
+  "created": "2026-10-08T11:04:50",
+  "sample_limit": 100,
+  "datasets": {
+    "sunrgbd": {
+      "structure": {},
+      "rgb": {},
+      "depth": {},
+      "labels": {},
+      "alignment": {}
+    },
+    "nyu_depth_v2": {
+      "structure": {},
+      "rgb": {},
+      "depth": {},
+      "labels": {},
+      "alignment": {}
+    }
+  },
+  "runtime_s": 0.0
+}
