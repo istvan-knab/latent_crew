@@ -1,3 +1,4 @@
+"""Load config.toml into a Config object."""
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
