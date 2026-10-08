@@ -24,10 +24,26 @@ def show(name, value, indent=0):
         print(f"{pad}{name}: {type(value).__name__} {str(value)[:80]}")
 
 
+def show_h5(f: h5py.File) -> None:
+    def visit(name, obj):
+        if name.startswith("#refs#"):  # internal storage, thousands of entries
+            return
+        print(name, getattr(obj, "shape", ""), getattr(obj, "dtype", ""))
+        if isinstance(obj, h5py.Dataset) and obj.dtype == h5py.ref_dtype and obj.size:
+            # Follow the first reference to see what it points to
+            first = f[obj[()].flat[0]]
+            if isinstance(first, h5py.Group):
+                print(f"  [0] -> struct, fields: {list(first)}")
+            else:
+                a = first[()]
+                print(f"  [0] -> {a.dtype} {a.shape}, unique {np.unique(a)[:15].tolist()}")
+    f.visititems(visit)
+
+
 def main(path):
     if h5py.is_hdf5(path):
         with h5py.File(path, "r") as f:
-            f.visititems(lambda n, o: print(n, getattr(o, "shape", ""), getattr(o, "dtype", "")))
+            show_h5(f)
     else:
         data = scipy.io.loadmat(path)
         for key, value in data.items():

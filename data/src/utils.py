@@ -44,6 +44,7 @@ def human_size(num_bytes: float) -> str:
         num_bytes /= 1024
     return f"{num_bytes:.1f} PiB"
 
+
 def save_image(array: np.ndarray, path: Path) -> None:
     """Save an array as an image; written to a temp file first, so it is never half-done."""
     path = Path(path)
@@ -51,3 +52,12 @@ def save_image(array: np.ndarray, path: Path) -> None:
     tmp = path.with_name(path.stem + ".tmp" + path.suffix)
     Image.fromarray(array).save(tmp, quality=95)  # quality only matters for JPEG
     tmp.replace(path)
+
+
+def copy_file(src: Path, dst: Path) -> None:
+    """Copy a file via a temp file, like save_image."""
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(dst.stem + ".tmp" + dst.suffix)
+    shutil.copyfile(src, tmp)
+    tmp.replace(dst)

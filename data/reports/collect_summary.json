@@ -1,0 +1,15 @@
+{
+  "started": "2026-10-08T12:29:05",
+  "datasets": {
+    "sunrgbd": {
+      "files": {
+        "sunrgbd_data": "skipped",
+        "sunrgbd_toolbox": "skipped",
+        "sunrgbd_meta2d": "skipped",
+        "sunrgbd_meta3d": "skipped"
+      },
+      "index": "C:\\Projects\\latent_crew\\data\\processed\\sunrgbd\\index.jsonl"
+    }
+  },
+  "finished": "2026-10-08T12:40:31"
+}

@@ -10,14 +10,20 @@ import h5py
 import numpy as np
 import requests
 import scipy.io
+from PIL import Image
 from tqdm import tqdm
 
 from .config import load_config
-from .extractors import h5_strings, read_nyu_sample, safe_extract_zip
-from .utils import free_space_bytes, get_logger, human_size, save_image, sha256_of
+from .extractors import (SUN_SENSORS, h5_strings, read_nyu_sample, read_sun_instances,
+                         read_sun_meta, read_sun_split, safe_extract_zip, sun_depth_to_mm)
+from .utils import (copy_file, free_space_bytes, get_logger, human_size, save_image,
+                    sha256_of)
 from .validators import ValidationError, check_mat, check_size, check_zip
 
 log = get_logger(__name__)
+
+# Index fields that hold file paths (relative to processed/<dataset>/)
+PATH_KEYS = ("rgb", "depth", "depth_raw", "semantic", "instance")
 
 
 class DataCollector:
@@ -63,9 +69,12 @@ class DataCollector:
                                                        verify, extract, force)
             result = {"files": files}
             if verify and extract:
-                result["verify"] = self.verify_dataset(name)
+                # The index is checked after prepare, which may still fix it
+                result["verify"] = self.verify_dataset(name, check_index=not prepare)
             if prepare:
                 result["index"] = str(self.prepare_dataset(name))
+                if verify:
+                    result["index_check"] = self._verify_index(name)
             summary["datasets"][name] = result
 
         summary["finished"] = datetime.now().isoformat(timespec="seconds")
@@ -187,12 +196,36 @@ class DataCollector:
             log.info("Copied: %s", archive.name)
         marker.write_text("ok\n", encoding="utf-8")
 
-    def verify_dataset(self, dataset: str) -> dict:
+    def verify_dataset(self, dataset: str, *, check_index: bool = True) -> dict:
         """Dataset-specific structure checks; raises ValidationError on problems."""
         if dataset == "nyu_depth_v2":
-            return self._verify_nyu()
-        log.warning("verify_dataset is not implemented yet, skipping: %s", dataset)
-        return {}
+            result = self._verify_nyu()
+        elif dataset == "sunrgbd":
+            result = self._verify_sun()
+        else:
+            raise ValidationError(f"Unknown dataset: {dataset}")
+        if check_index:
+            result["index"] = self._verify_index(dataset)
+        return result
+
+    def _verify_index(self, dataset: str) -> str:
+        """Check that every path listed in index.jsonl exists."""
+        out = self.cfg.processed / dataset
+        index = out / "index.jsonl"
+        if not index.exists():
+            log.info("%s: no index.jsonl yet (run --prepare)", dataset)
+            return "not prepared"
+        missing, count = [], 0
+        with open(index, encoding="utf-8") as fh:
+            for line in fh:
+                row = json.loads(line)
+                count += 1
+                missing += [row[k] for k in PATH_KEYS if k in row and not (out / row[k]).exists()]
+        if missing:
+            raise ValidationError(
+                f"{index}: {len(missing)} missing files, e.g. {missing[:5]}")
+        log.info("%s index OK: %d samples, all files present", dataset, count)
+        return f"ok ({count} samples)"
 
     def _verify_nyu(self) -> dict:
         raw = self.cfg.raw / "nyu_depth_v2"
@@ -230,11 +263,100 @@ class DataCollector:
         log.info("NYU OK: %d samples (%d train, %d test)", n, len(train), len(test))
         return {"samples": n, "train": len(train), "test": len(test)}
 
+    def _sun_paths(self) -> dict:
+        toolbox = self.cfg.raw / "sunrgbd" / "SUNRGBDtoolbox"
+        return {
+            "meta": toolbox / "Metadata" / "SUNRGBDMeta.mat",
+            "seg": toolbox / "Metadata" / "SUNRGBD2Dseg.mat",
+            "split": toolbox / "traintestSUNRGBD" / "allsplit.mat",
+        }
+
+    def _sun_samples(self) -> list[dict]:
+        """One dict per SUN image with absolute file paths and its split."""
+        paths = self._sun_paths()
+        train, test = read_sun_split(paths["split"])
+        samples = []
+        for m in read_sun_meta(paths["meta"]):
+            folder = self.cfg.raw / "sunrgbd" / m["key"]
+            samples.append({
+                "key": m["key"],
+                "split": "train" if m["key"] in train else "test" if m["key"] in test else None,
+                "sensor": SUN_SENSORS.get(m["sensor"], m["sensor"]),
+                "folder": folder,
+                "rgb": folder / "image" / m["rgb"],
+                "depth": folder / "depth_bfx" / m["depth"],  # hole-filled depth
+                "depth_raw": folder / "depth" / m["depth"],
+                "seg": folder / "seg.mat",
+            })
+        return samples
+
+    def _verify_sun(self) -> dict:
+        paths = self._sun_paths()
+        for path in paths.values():
+            if not path.exists():
+                raise ValidationError(f"Missing file: {path}")
+
+        log.info("Reading SUN metadata (this takes a while)...")
+        samples = self._sun_samples()
+        n = len(samples)
+        train, test = read_sun_split(paths["split"])
+        if train & test:
+            raise ValidationError(f"SUN train/test splits overlap: {len(train & test)} samples")
+        no_split = [s["key"] for s in samples if s["split"] is None]
+        if no_split or len(train) + len(test) != n:
+            raise ValidationError(
+                f"SUN splits do not match metadata ({n} samples, "
+                f"{len(train)} + {len(test)} in splits), e.g. {no_split[:3]}")
+
+        # Every sample needs RGB, both depth maps and seg.mat
+        missing = [str(s[k]) for s in tqdm(samples, desc="Checking SUN files", unit="sample")
+                   for k in ("rgb", "depth", "depth_raw", "seg") if not s[k].exists()]
+        if missing:
+            raise ValidationError(f"SUN: {len(missing)} missing files, e.g. {missing[:5]}")
+
+        with h5py.File(paths["seg"], "r") as f:
+            labels = f["SUNRGBD2Dseg"]["seglabel"][()].ravel()
+            if len(labels) != n:
+                raise ValidationError(f"SUNRGBD2Dseg has {len(labels)} labels, expected {n}")
+            # Fully decode a few samples and check that the shapes match
+            for i in (0, n // 2, n - 1):
+                s = samples[i]
+                shapes = {
+                    "rgb": np.array(Image.open(s["rgb"])).shape[:2],
+                    "depth": np.array(Image.open(s["depth"])).shape,
+                    "semantic": f[labels[i]][()].T.shape,
+                    "instance": read_sun_instances(s["seg"]).shape,
+                }
+                if len(set(shapes.values())) != 1:
+                    raise ValidationError(f"SUN sample {s['key']}: shape mismatch {shapes}")
+
+        n_test = sum(s["split"] == "test" for s in samples)
+        log.info("SUN OK: %d samples (%d train, %d test)", n, n - n_test, n_test)
+        return {"samples": n, "train": n - n_test, "test": n_test}
+
     def prepare_dataset(self, dataset: str) -> Path:
         """Convert raw/ data into processed/<dataset>/{train,test} plus index.jsonl."""
         if dataset == "nyu_depth_v2":
             return self._prepare_nyu()
-        raise NotImplementedError(f"prepare_dataset is not implemented yet: {dataset}")
+        if dataset == "sunrgbd":
+            return self._prepare_sun()
+        raise ValidationError(f"Unknown dataset: {dataset}")
+
+    def _write_index(self, dataset: str, rows: list[dict], classes: list[str]) -> Path:
+        """Write classes.json and index.jsonl (via a temp file) and log the split sizes."""
+        out = self.cfg.processed / dataset
+        (out / "classes.json").write_text(json.dumps(classes, indent=2), encoding="utf-8")
+        index = out / "index.jsonl"
+        tmp = index.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        tmp.replace(index)
+
+        n_test = sum(r["split"] == "test" for r in rows)
+        log.info("%s prepared: %d samples (%d train, %d test) -> %s",
+                 dataset, len(rows), len(rows) - n_test, n_test, index)
+        return index
 
     def _prepare_nyu(self) -> Path:
         raw = self.cfg.raw / "nyu_depth_v2"
@@ -267,8 +389,7 @@ class DataCollector:
                 rows.append(row)
 
                 # Skip samples that an earlier run already wrote
-                keys = ("rgb", "depth", "semantic", "instance")
-                if all((out / row[k]).exists() for k in keys):
+                if all((out / row[k]).exists() for k in PATH_KEYS if k in row):
                     continue
 
                 s = read_nyu_sample(f, i)
@@ -279,15 +400,49 @@ class DataCollector:
                 save_image(s["semantic"].astype(np.uint16), out / row["semantic"])
                 save_image(s["instance"].astype(np.uint8), out / row["instance"])
 
-        (out / "classes.json").write_text(json.dumps(classes, indent=2), encoding="utf-8")
-        index = out / "index.jsonl"
-        tmp = index.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
-            for row in rows:
-                fh.write(json.dumps(row) + "\n")
-        tmp.replace(index)
+        return self._write_index("nyu_depth_v2", rows, classes)
 
-        n_test = sum(r["split"] == "test" for r in rows)
-        log.info("NYU prepared: %d samples (%d train, %d test) -> %s",
-                 len(rows), len(rows) - n_test, n_test, index)
-        return index
+    def _prepare_sun(self) -> Path:
+        out = self.cfg.processed / "sunrgbd"
+        out.mkdir(parents=True, exist_ok=True)
+        log.info("Reading SUN metadata (this takes a while)...")
+        samples = self._sun_samples()
+
+        rows = []
+        with h5py.File(self._sun_paths()["seg"], "r") as f:
+            # 37-class labels: 0 means unlabeled, label k is seg37list[k - 1]
+            classes = ["unlabeled"] + h5_strings(f, "seg37list")
+            labels = f["SUNRGBD2Dseg"]["seglabel"][()].ravel()
+
+            for i, s in enumerate(tqdm(samples, desc="Preparing SUN", unit="sample")):
+                split = s["split"]
+                stem = f"{i + 1:06d}"
+                scene_file = s["folder"] / "scene.txt"
+                row = {
+                    "id": f"sun_{stem}",
+                    "dataset": "sunrgbd",
+                    "split": split,
+                    "rgb": f"{split}/rgb/{stem}.jpg",
+                    "depth": f"{split}/depth/{stem}.png",
+                    "depth_raw": f"{split}/depth_raw/{stem}.png",
+                    "semantic": f"{split}/semantic/{stem}.png",
+                    "instance": f"{split}/instance/{stem}.png",
+                    "scene": scene_file.read_text().strip() if scene_file.exists() else "unknown",
+                    "sensor": s["sensor"],
+                    "source": s["key"],
+                }
+                rows.append(row)
+
+                # Skip samples that an earlier run already wrote
+                if all((out / row[k]).exists() for k in PATH_KEYS):
+                    continue
+
+                # RGB is already JPEG, so copy it instead of re-encoding
+                copy_file(s["rgb"], out / row["rgb"])
+                for k in ("depth", "depth_raw"):
+                    save_image(sun_depth_to_mm(np.array(Image.open(s[k]))), out / row[k])
+                # MATLAB v7.3 stores the label maps transposed
+                save_image(f[labels[i]][()].T.astype(np.uint8), out / row["semantic"])
+                save_image(read_sun_instances(s["seg"]), out / row["instance"])
+
+        return self._write_index("sunrgbd", rows, classes)
