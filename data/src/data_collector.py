@@ -47,8 +47,11 @@ class DataCollector:
         force: bool = False,
     ) -> dict:
         """Run the full pipeline; returns a summary that is also saved to reports/."""
-        if include_raw_nyu:
-            log.warning("Raw NYU download is not supported yet, skipping it.")
+        if include_raw_nyu or self.cfg.include_raw_nyu:
+            raise ValidationError(
+                "Raw NYU (~428 GB) is not supported; the labeled .mat is used. "
+                "See data/README.md for manual download."
+            )
 
         free = free_space_bytes(self.cfg.downloads)
         if free < self.cfg.min_free_space_gb * 1024**3:

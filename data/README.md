@@ -8,7 +8,7 @@ Download, verification and preparation of the SUN RGB-D (V1) and NYU Depth V2 (l
 pip install -r data/requirements.txt
 ```
 
-`scipy` is pinned below 1.18, because Windows Smart App Control blocks 1.18.x.
+`scipy` is pinned below 1.18 and `h5py` below 3.16, because Windows Smart App Control blocks scipy 1.18.x and h5py 3.16.0.
 
 ## Usage
 
@@ -30,7 +30,7 @@ With no step flag (`--verify`, `--extract`, `--prepare`), every step runs; with 
 | `--prepare` | Write `processed/<dataset>/` and `index.jsonl` |
 | `--verify-only` | Check downloads, dataset structure and index; writes nothing |
 | `--force` | Download and extract again |
-| `--include-raw-nyu` | Full raw NYU (~428 GB); not supported yet, only logs a warning |
+| `--include-raw-nyu` | Not supported: stops with an error (see [Raw NYU](#raw-nyu)) |
 
 Behaviour:
 
@@ -39,6 +39,10 @@ Behaviour:
 - **Atomic**: every output is written to a temporary file first, so no half-written files are left behind.
 - **Errors**: a failed check prints `ERROR: ...` and exits with code 1.
 - `raw/` is never modified; all conversions go to `processed/`.
+
+### Raw NYU
+
+Only the labeled NYU subset (`nyu_depth_v2_labeled.mat`, ~2.8 GB, 1449 samples) is used; the team does not need the full raw dataset (~428 GB). `--include-raw-nyu` (or `include_raw_nyu = true` in `config.toml`) therefore stops with an error instead of downloading. If it is ever needed, download it manually from the [official NYU Depth V2 page](https://cs.nyu.edu/~fergus/datasets/nyu_depth_v2.html) into a folder outside `data/`; it is not handled by the collector or the index.
 
 Evaluate the prepared data (quick test on 50 samples; omit the flag for all samples):
 

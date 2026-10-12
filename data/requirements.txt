@@ -1,6 +1,6 @@
 numpy
 scipy<1.18  # 1.18.x blocked by Windows Smart App Control
-h5py
+h5py<3.16  # 3.16.0 blocked by Windows Smart App Control
 Pillow
 tqdm
 requests

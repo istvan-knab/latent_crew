@@ -1,10 +1,10 @@
-# Nagy adatfájlok: ezek sosem kerülhetnek Gitbe
+# Large data files: never commit these
 downloads/
 raw/
 processed/
 
-# Félbehagyott letöltések ideiglenes fájljai
+# Partial downloads
 *.part
 
-# A Python automatikusan generált gyorsítótára
+# Python bytecode cache
 __pycache__/
