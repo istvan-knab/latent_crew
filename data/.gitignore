@@ -1,0 +1,15 @@
+# Large data files: never commit these
+downloads/
+raw/
+processed/
+
+# Partial downloads
+*.part
+
+# Python bytecode cache
+__pycache__/
+
+# Generated reports: regenerate with the scripts; keep the Markdown report and the problematic samples list
+reports/*
+!reports/data_evaluation.md
+!reports/problematic_samples.jsonl

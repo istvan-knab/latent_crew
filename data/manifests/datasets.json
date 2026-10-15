@@ -1,0 +1,68 @@
+{
+  "sunrgbd": {
+    "name": "SUN RGB-D",
+    "version": "V1",
+    "files": [
+      {
+        "id": "sunrgbd_data",
+        "url": "https://rgbd.cs.princeton.edu/data/SUNRGBD.zip",
+        "download": "sunrgbd/SUNRGBD.zip",
+        "kind": "zip",
+        "raw": "sunrgbd",
+        "size_bytes": 6885481608,
+        "sha256": "1a6dbf2a1c9044c4805a35ee648d616ea39a231fd5bd6f77e84cd2b8287fe41c"
+      },
+      {
+        "id": "sunrgbd_toolbox",
+        "url": "https://rgbd.cs.princeton.edu/data/SUNRGBDtoolbox.zip",
+        "download": "sunrgbd/SUNRGBDtoolbox.zip",
+        "kind": "zip",
+        "raw": "sunrgbd",
+        "size_bytes": 570324301,
+        "sha256": "946ee4dada878d508bcc0b754066c6d20e80160563d0277782cddaaee7b6e193"
+      },
+      {
+        "id": "sunrgbd_meta2d",
+        "url": "https://rgbd.cs.princeton.edu/data/SUNRGBDMeta2DBB_v2.mat",
+        "download": "sunrgbd/SUNRGBDMeta2DBB_v2.mat",
+        "kind": "file",
+        "raw": "sunrgbd/metadata",
+        "size_bytes": 4300305,
+        "sha256": "d42020e95c6b654b2c81f0e04c8dba615b98733075e0c8605e6bd43bbb9b2899"
+      },
+      {
+        "id": "sunrgbd_meta3d",
+        "url": "https://rgbd.cs.princeton.edu/data/SUNRGBDMeta3DBB_v2.mat",
+        "download": "sunrgbd/SUNRGBDMeta3DBB_v2.mat",
+        "kind": "file",
+        "raw": "sunrgbd/metadata",
+        "size_bytes": 9873056,
+        "sha256": "0f8c97ab95630d2461212ffc9589facb8cf3444cafab4c6d93d97541b347e36b"
+      }
+    ]
+  },
+    "nyu_depth_v2": {
+    "name": "NYU Depth V2",
+    "version": "labeled",
+    "files": [
+      {
+        "id": "nyu_labeled",
+        "url": "https://horatio.cs.nyu.edu/mit/silberman/nyu_depth_v2/nyu_depth_v2_labeled.mat",
+        "download": "nyu_depth_v2/nyu_depth_v2_labeled.mat",
+        "kind": "file",
+        "raw": "nyu_depth_v2",
+        "size_bytes": 2972037809,
+        "sha256": "2d724b0c0ab358aa1ce5df855e5bd14a2279ab7202efe22f32a30d612dcb86aa"
+      },
+      {
+        "id": "nyu_splits",
+        "url": "https://horatio.cs.nyu.edu/mit/silberman/indoor_seg_sup/splits.mat",
+        "download": "nyu_depth_v2/splits.mat",
+        "kind": "file",
+        "raw": "nyu_depth_v2",
+        "size_bytes": 2626,
+        "sha256": "6e081404491a8bfba2f066beaa9713ef6046f9007aa5f799f2a350506a580cee"
+      }
+    ]
+  }
+}

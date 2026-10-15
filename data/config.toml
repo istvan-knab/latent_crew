@@ -1,0 +1,19 @@
+[paths]
+# All paths are relative to the data/ folder
+manifest = "manifests/datasets.json"
+downloads = "downloads"
+raw = "raw"
+processed = "processed"
+reports = "reports"
+
+[collect]
+# Datasets downloaded by default
+datasets = ["sunrgbd", "nyu_depth_v2"]
+# Raw NYU (~428 GB) is not supported; true stops with an error (see README)
+include_raw_nyu = false
+# Free space required before downloading (GB)
+min_free_space_gb = 40
+# Download settings
+chunk_size_mb = 8
+timeout_s = 60
+retries = 3
