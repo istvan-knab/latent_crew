@@ -1,0 +1,54 @@
+# Segmentation config. Encoder and decoder options with pros/cons: docs/segmentation_models.md
+
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus
+  task: 2d_segmentation # 2d_segmentation | 3d_segmentation | 2d_detection | 3d_detection (only 2d_segmentation implemented)
+  seed: 42
+  output_dir: checkpoints
+
+dataset:
+  name: sunrgbd # or nyu_depth_v2 (needs the 894 -> 40 class mapping, not in processed/ yet)
+  root: data/processed/sunrgbd
+  num_classes: 37 # sunrgbd: 37, nyu_depth_v2: 40 (NYU40); label 0 (unlabeled) is not a class
+  ignore_index: 255 # unlabeled pixels are remapped 0 -> 255 and left out of the loss and mIoU
+  modalities: [rgb, depth] # [rgb] = 3 input channels, [rgb, depth] = 4 (early fusion)
+
+model:
+  decoder: deeplabv3plus # unet | fpn | deeplabv3 | deeplabv3plus | pspnet | upernet | segformer
+  encoder: resnet50 # smp name (resnet50, mit_b2, efficientnet-b0, ...) or tu-<timm model> (tu-convnext_tiny)
+  encoder_weights: imagenet # or null for random init
+  decoder_kwargs: {} # passed to the smp architecture, e.g. {encoder_output_stride: 16}
+
+training:
+  epochs: 100
+  batch_size: 8
+  optimizer: sgd # sgd for CNN encoders, adamw for transformer encoders
+  lr: 0.01 # decoder LR; adamw: ~6e-5
+  momentum: 0.9 # sgd only
+  weight_decay: 0.0001 # adamw: ~0.01
+  scheduler: poly # poly | cosine
+  warmup_iters: 500
+  encoder_lr_mult: 0.1 # encoder LR = lr * encoder_lr_mult (pretrained weights move slower)
+  freeze_encoder_epochs: 0 # > 0: train only the decoder for the first N epochs
+  class_weighting: none # none | median_frequency
+  amp: true # mixed precision (bfloat16 on CUDA)
+  val_fraction: 0.1 # held out from the train split for model selection; the test split is only used for the final evaluation
+  eval_every: 1 # validate every N epochs
+  log_every: 20 # log training loss and LR every N iterations
+
+augmentation: # geometric ops apply to rgb, depth and mask alike; color jitter to rgb only
+  crop_size: [480, 640] # [height, width], multiples of 32
+  scale_range: [0.5, 2.0]
+  hflip: true
+  color_jitter: 0.2
+
+hardware:
+  device: cuda # cuda | mps (Apple) | cpu; fails if the device is not available
+  num_workers: 4
+
+logging: # Weights & Biases; experiment.task is always added as the first tag and as job type
+  project: latent-crew
+  entity: null # W&B team or user name, null = your default entity
+  mode: online # online | offline (sync later with `wandb sync`) | disabled
+  num_sample_images: 4 # validation images (RGB, depth, label, prediction) logged at every evaluation
+  tags: [] # extra tags, e.g. [rgbd, baseline]

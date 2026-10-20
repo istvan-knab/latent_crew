@@ -9,4 +9,7 @@ services:
       - ../configs:/app/configs
       - ../data:/app/data
       - ../checkpoints:/app/checkpoints
+      - ../outputs:/app/outputs
+    environment:
+      - WANDB_API_KEY # passed through from the host shell, never stored in the repo
     working_dir: /app

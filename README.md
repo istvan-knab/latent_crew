@@ -50,6 +50,39 @@ Docker:
 docker compose -f docker/docker-compose.yml build
 ```
 
+### Running on an NVIDIA GPU (DGX Spark)
+
+The base Compose file has no GPU access, so it also runs on machines without an NVIDIA GPU (e.g. macOS). On a GPU machine add `docker/docker-compose.gpu.yml` (needs the NVIDIA Container Toolkit on the host, which DGX OS ships). Without it the container does not see the GPU, and with `hardware.device: cuda` training stops with `CUDA is not available` instead of silently training on the CPU.
+
+**1. GPU check (run this first).** The locked `torch` has a Linux aarch64 wheel built against CUDA 13, but whether it contains kernels for the Spark's GB10 GPU (Blackwell, compute capability 12.1) is not verified yet. Expected: `True`, the GB10 device name and `(12, 1)`, without a warning about unsupported compute capability:
+
+```bash
+uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))"
+```
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml run --rm latent-crew python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))"
+```
+
+If it prints `False`, a CUDA error or an unsupported-capability warning, install torch from the PyTorch CUDA index instead (configure it in `pyproject.toml` via `[tool.uv.index]` / `[tool.uv.sources]`, limited to Linux so macOS still resolves).
+
+**2. Before the first training run:**
+
+- **Weights & Biases:** log in once with `uv run wandb login`. For Docker, export the key in the host shell (`export WANDB_API_KEY=...`); Compose passes it into the container. Never put the key in the repo. Without W&B: `logging.mode: disabled` (or `offline`, sync later with `wandb sync`).
+- **Data:** the first run downloads SUN RGB-D (~7 GB) and prepares it (~11 min); at least 40 GB of free disk space is needed (the collector checks it). Later runs reuse `data/processed/` and download nothing.
+- **Working directory:** run every command from the repository root; `dataset.root` in the config is relative to it.
+- **Pretrained weights:** the ImageNet encoder weights are downloaded on first use. Locally they are cached; in Docker there is no cache volume yet, so every container run downloads them again (slower start, not an error).
+
+**3. Train:**
+
+```bash
+scripts/train_segmentation.sh configs/segmentation.yaml
+```
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml run --rm latent-crew scripts/train_segmentation.sh configs/segmentation.yaml
+```
+
 ### Configuration
 
 Set the dataset, model and hyperparameters in a config file (see `configs/default.yaml`):
@@ -93,12 +126,26 @@ docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/train_d
 
 ### Train segmentation
 
+Segmentation uses its own config, `configs/segmentation.yaml`: task label (`experiment.task: 2d_segmentation`), dataset, encoder, decoder, input modalities (RGB or RGB-D), hyperparameters and W&B logging. Options and best practices: [docs/segmentation_models.md](docs/segmentation_models.md).
+
+At start the script checks `data/processed/<dataset>/index.jsonl` and the files it lists. If everything is there, it is used as is; only if something is missing does it run `data/scripts/collect_data.py` for that dataset (download, verify, extract, prepare; resumable, needs ~40 GB free space). Only `sunrgbd` can be trained for now (NYU needs the NYU40 class mapping).
+
+Log in to Weights & Biases once (`uv run wandb login`) or set `WANDB_API_KEY`; set `logging.mode: disabled` to train without W&B. Every run is tagged with its task label.
+
 ```bash
-scripts/train_segmentation.sh configs/default.yaml
+scripts/train_segmentation.sh configs/segmentation.yaml
 ```
 
 ```bash
-docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/train_segmentation.sh configs/default.yaml
+docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/train_segmentation.sh configs/segmentation.yaml
+```
+
+Checkpoints go to `checkpoints/<experiment.name>/` (`best.pt` by validation mIoU, `last.pt`, `config.yaml`). Validation uses `training.val_fraction` of the official train split; the test split is only used by the test script.
+
+Show one sample as the model sees it (RGB, depth, label mask, overlay; `--augment` applies the training augmentation):
+
+```bash
+scripts/visualize_segmentation.sh configs/segmentation.yaml --index 0
 ```
 
 ### Test detection
@@ -113,13 +160,17 @@ docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/test_de
 
 ### Test segmentation
 
+Evaluates on the test split (mIoU, per-class IoU, pixel accuracy), prints the table, writes `<checkpoint>_test_metrics.json` and logs a W&B run tagged `2d_segmentation` and `evaluation`. The network is rebuilt from the model spec saved in the checkpoint.
+
 ```bash
-scripts/test_segmentation.sh configs/default.yaml checkpoints/segmentation.pt
+scripts/test_segmentation.sh configs/segmentation.yaml checkpoints/sunrgbd_rgbd_resnet50_deeplabv3plus/best.pt
 ```
 
 ```bash
-docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/test_segmentation.sh configs/default.yaml checkpoints/segmentation.pt
+docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/test_segmentation.sh configs/segmentation.yaml checkpoints/sunrgbd_rgbd_resnet50_deeplabv3plus/best.pt
 ```
+
+Tests: `uv run pytest -q` (includes an end-to-end training run on synthetic data, CPU, W&B off).
 
 ### Run the app (detection + segmentation end-to-end)
 
