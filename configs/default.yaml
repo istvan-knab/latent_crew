@@ -1,0 +1,20 @@
+dataset:
+  name: sunrgbd # or nyu_depth_v2
+  root: data/sunrgbd
+  num_classes: 37 # TODO: confirm per dataset
+
+model:
+  name: TODO # backbone/architecture not chosen yet
+  task: detection # or segmentation
+
+training:
+  batch_size: TODO
+  epochs: TODO
+  lr: TODO
+  optimizer: TODO
+  weight_decay: TODO
+  seed: TODO
+
+hardware:
+  device: cuda # TODO: confirm GPU/CUDA version used
+  num_workers: TODO

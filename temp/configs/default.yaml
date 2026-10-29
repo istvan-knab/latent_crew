@@ -1,0 +1,29 @@
+experiment:
+  project: "mnist-classifier"
+  run_name: null
+  seed: 42
+  output_dir: "outputs"
+
+data:
+  validation_fraction: 0.1
+  batch_size: 128
+  shuffle_buffer: 10000
+  cache: true
+  prefetch: true
+
+model:
+  conv_filters: [32, 64]
+  dense_units: 128
+  dropout: 0.3
+
+training:
+  epochs: 20
+  optimizer: "adam"
+  learning_rate: 0.001
+  early_stopping_patience: 4
+  reduce_lr_patience: 2
+  require_gpu: true
+
+logging:
+  use_wandb: true
+  log_model_artifact: true

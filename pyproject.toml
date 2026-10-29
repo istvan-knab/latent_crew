@@ -1,0 +1,22 @@
+[project]
+name = "latent-crew"
+version = "0.1.0"
+description = "3D object detection and segmentation on SUN RGB-D and NYU Depth V2"
+requires-python = ">=3.14"
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "opencv-python",
+    "open3d",
+    "scipy",
+    "pyyaml",
+    "tqdm",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

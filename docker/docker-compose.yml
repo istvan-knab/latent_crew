@@ -1,0 +1,12 @@
+services:
+  latent-crew:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+      - ../configs:/app/configs
+      - ../data:/app/data
+      - ../checkpoints:/app/checkpoints
+    working_dir: /app
