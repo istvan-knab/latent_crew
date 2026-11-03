@@ -12,4 +12,6 @@ services:
       - ../outputs:/app/outputs
     environment:
       - WANDB_API_KEY # passed through from the host shell, never stored in the repo
+      - WANDB_DATA_DIR=/app/outputs/wandb-data # artifact staging survives --rm for offline sync
+      - WANDB_CACHE_DIR=/app/outputs/wandb-cache
     working_dir: /app

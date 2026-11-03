@@ -142,6 +142,27 @@ docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/train_s
 
 Checkpoints go to `checkpoints/<experiment.name>/` (`best.pt` by validation mIoU, `last.pt`, `config.yaml`). Validation uses `training.val_fraction` of the official train split; the test split is only used by the test script.
 
+After successful training, the run logs a W&B artifact of type `model`, named `segmentation-<run_id>`, containing `best.pt`, `last.pt` and `config.yaml`. Find it in the run's **Artifacts** tab; its metadata includes the model specification, best validation mIoU and best epoch. Both checkpoints include the weights, model specification, class names and configuration needed to rebuild the network. With `logging.mode: online` the artifact is uploaded; `offline` stages it for later `wandb sync`, and `disabled` keeps only the local checkpoints. Existing checkpoints are not uploaded retroactively.
+
+Docker keeps W&B artifact staging and its cache under the mounted `outputs/` directory, so they survive container removal. Sync offline Docker runs from the same Compose environment so their stored file paths resolve.
+
+#### Hyperparameter optimisation
+
+`configs/hpo_segmentation.yaml` holds the search space (with priors), the fidelity (training epochs per trial) and the total budget in epochs; everything else comes from the base config. Two algorithms are available through [NePS](https://github.com/automl/neps), chosen with `--optimizer`:
+
+- `ifbo` (default): In-Context Freeze-Thaw BO, Rakotoarison et al., ICML 2024. Trains the configurations one epoch at a time and uses a pretrained learning-curve model to decide which one to continue. The surrogate (~55 MB) is downloaded on first use into `outputs/hpo/ifbo_surrogate/`.
+- `priorband`: PriorBand, Mallik et al., NeurIPS 2023. Hyperband that samples around the priors (the base config) and the best configuration found so far.
+
+```bash
+scripts/hpo_segmentation.sh configs/segmentation.yaml configs/hpo_segmentation.yaml
+```
+
+```bash
+scripts/hpo_segmentation.sh configs/segmentation.yaml configs/hpo_segmentation.yaml --optimizer priorband
+```
+
+Results go to `outputs/hpo/<study_name>/<optimizer>/`: one directory per trial step (config, report, and `state.pt` for the newest step of each configuration), NePS summaries in `summary/`, and `best_config.yaml`, which you can train directly with `scripts/train_segmentation.sh`. Running the same command again continues the study. In W&B, each configuration is one run (resumed at every step), grouped as `<study_name>-<optimizer>` and tagged `hpo`. Details: [docs/segmentation_models.md](docs/segmentation_models.md#hyperparameter-optimisation).
+
 Show one sample as the model sees it (RGB, depth, label mask, overlay; `--augment` applies the training augmentation):
 
 ```bash

@@ -1,0 +1,34 @@
+# Hyperparameter optimisation of the segmentation training (NePS). Used together with a base config:
+#   scripts/hpo_segmentation.sh configs/segmentation.yaml configs/hpo_segmentation.yaml [--optimizer ifbo|priorband]
+# Every value not in search_space comes from the base config. Background and papers: docs/segmentation_models.md
+
+study_name: sunrgbd_rgbd_resnet50_deeplabv3plus # results: <output_dir>/<study_name>/<optimizer>/; rerunning continues the study
+output_dir: outputs/hpo
+budget_epochs: 300 # total training epochs over all trials (here = 10 full runs of max_epochs)
+
+fidelity: # number of training epochs; the LR schedule always spans max_epochs
+  min_epochs: 1 # must exceed freeze_encoder_epochs
+  max_epochs: 30 # epochs of a full trial; best_config.yaml is written with this many epochs
+
+ifbo: # Rakotoarison et al., ICML 2024; extra keys are passed to neps' ifbo optimizer
+  step_size: 1 # epochs per step: each step continues the chosen configuration by this many epochs
+  use_priors: true # sample the initial design around the priors below (false = the paper's plain Sobol design)
+  sample_prior_first: true # the first trial is the base config
+  surrogate_dir: outputs/hpo/ifbo_surrogate # FT-PFN weights (~55 MB), downloaded on first use
+  device: cpu # where the surrogate runs; it is small, so the GPU stays free for training
+
+priorband: # Mallik et al., NeurIPS 2023; extra keys are passed to neps' priorband optimizer
+  eta: 3 # Hyperband reduction factor: rungs at roughly 1, 3, 10, 30 epochs
+  base: hyperband # successive_halving | hyperband | asha | async_hb
+  sample_prior_first: true # the first trial is the base config
+
+# training.<field>: {type: float | int | categorical, lower, upper, log, choices, prior, confidence: low | medium | high}
+# The priors match configs/segmentation.yaml (SGD + ResNet-50); change them together with the base config.
+search_space:
+  training.lr: {type: float, lower: 1.0e-3, upper: 1.0e-1, log: true, prior: 1.0e-2, confidence: medium}
+  training.encoder_lr_mult: {type: float, lower: 1.0e-2, upper: 1.0, log: true, prior: 0.1, confidence: medium}
+  training.weight_decay: {type: float, lower: 1.0e-5, upper: 1.0e-3, log: true, prior: 1.0e-4, confidence: medium}
+  training.momentum: {type: float, lower: 0.8, upper: 0.99, prior: 0.9, confidence: high} # sgd only
+  training.warmup_iters: {type: int, lower: 0, upper: 2000, prior: 500, confidence: low}
+  training.scheduler: {type: categorical, choices: [poly, cosine], prior: poly, confidence: medium}
+  training.class_weighting: {type: categorical, choices: [none, median_frequency], prior: none, confidence: low}

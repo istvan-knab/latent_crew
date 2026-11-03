@@ -34,8 +34,12 @@ def autocast(device: torch.device, enabled: bool) -> contextlib.AbstractContextM
     return contextlib.nullcontext()
 
 
-def init_wandb(config: SegmentationConfig, run_name: str, extra_tags: List[str] = ()) -> "wandb.Run":
-    """Every run carries the task label (e.g. 2d_segmentation) as job type and first tag."""
+def init_wandb(config: SegmentationConfig, run_name: str, extra_tags: List[str] = (), run_id: str | None = None,
+               group: str | None = None) -> "wandb.Run":
+    """Every run carries the task label (e.g. 2d_segmentation) as job type and first tag.
+
+    With run_id an existing run is continued (HPO resumes the same configuration in several steps).
+    """
     log = config.logging
     out = Path("outputs")  # local W&B files go to outputs/wandb (gitignored, mounted in Docker)
     out.mkdir(parents=True, exist_ok=True)
@@ -48,4 +52,7 @@ def init_wandb(config: SegmentationConfig, run_name: str, extra_tags: List[str] 
         tags=config.wandb_tags + [t for t in extra_tags if t not in config.wandb_tags],
         config=config.to_dict(),
         dir=out,
+        id=run_id,
+        resume="allow" if run_id else None,
+        group=group,
     )

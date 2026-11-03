@@ -1,17 +1,19 @@
 """End-to-end smoke test: dataset check -> training -> checkpoint -> test evaluation, on synthetic data, CPU, W&B off."""
 
+import io
 import subprocess
 from pathlib import Path
 
 import pytest
 import torch
+import wandb
 import yaml
 
 from latent_crew.config import SegmentationConfig
 from latent_crew.data.prepare import count_missing_files, ensure_dataset
 from latent_crew.evaluation.metrics import ConfusionMatrix
 from latent_crew.evaluation.test_segmentation import test as run_test
-from latent_crew.training.train_segmentation import lr_lambda, train
+from latent_crew.training.train_segmentation import log_checkpoint_artifact, lr_lambda, train
 from test_segmentation_dataset import write_fake_dataset
 
 CONFIG_PATH = Path(__file__).parents[1] / "configs" / "segmentation.yaml"
@@ -45,6 +47,45 @@ def test_train_then_test(config: SegmentationConfig) -> None:
     metrics = run_test(config, best, "test")
     assert 0.0 <= metrics["mIoU"] <= 1.0
     assert (best.parent / "best_test_metrics.json").exists()
+
+
+def test_training_logs_recoverable_model_artifact(config: SegmentationConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    config.logging.mode = "offline"
+    config.logging.num_sample_images = 0
+    monkeypatch.setenv("WANDB_CACHE_DIR", str(Path(config.experiment.output_dir).parent / "wandb-cache"))
+    monkeypatch.setenv("WANDB_DATA_DIR", str(Path(config.experiment.output_dir).parent / "wandb-data"))
+    captured = []
+    original = wandb.Run.log_artifact
+
+    def capture(run, artifact, *args, **kwargs):
+        files = {name: Path(entry.local_path).read_bytes() for name, entry in artifact.manifest.entries.items()}
+        captured.append((artifact, files, run.id))
+        return original(run, artifact, *args, **kwargs)
+
+    monkeypatch.setattr(wandb.Run, "log_artifact", capture)
+    best = train(config)
+
+    assert len(captured) == 1
+    artifact, files, run_id = captured[0]
+    assert artifact.type == "model"
+    assert set(files) == {"best.pt", "last.pt", "config.yaml"}
+    assert run_id in artifact.name
+    for name, content in files.items():
+        assert content == (best.parent / name).read_bytes()
+    checkpoint = torch.load(io.BytesIO(files["best.pt"]), map_location="cpu", weights_only=True)
+    assert checkpoint["model_spec"] == artifact.metadata["model_spec"] == config.model_spec()
+    assert checkpoint["epoch"] == artifact.metadata["best_epoch"]
+    assert checkpoint["val_metrics"]["mIoU"] == artifact.metadata["best_val_mIoU"]
+    assert torch.load(io.BytesIO(files["last.pt"]), weights_only=True)["epoch"] == config.training.epochs
+    assert yaml.safe_load(files["config.yaml"]) == config.to_dict()
+
+
+def test_disabled_logging_skips_model_artifact(config: SegmentationConfig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def fail(*args, **kwargs):
+        raise AssertionError("disabled W&B must not construct or upload model artifacts")
+
+    monkeypatch.setattr(wandb, "Artifact", fail)
+    log_checkpoint_artifact(None, config, tmp_path / "missing-checkpoints")
 
 
 def test_existing_dataset_is_not_downloaded(config: SegmentationConfig, monkeypatch: pytest.MonkeyPatch) -> None:
