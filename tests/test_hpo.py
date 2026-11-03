@@ -7,7 +7,7 @@ import torch
 import yaml
 
 from latent_crew.config import SegmentationConfig
-from latent_crew.training.hpo_segmentation import STATE_FILE, HpoConfig, ParamSpec, SegmentationStudy
+from latent_crew.training.hpo_segmentation import STATE_FILE, HpoConfig, ParamSpec, SegmentationStudy, StudyLogger, sweep_config
 from test_training import config  # noqa: F401 (fixture)
 
 HPO_CONFIG_PATH = Path(__file__).parents[1] / "configs" / "hpo_segmentation.yaml"
@@ -100,6 +100,18 @@ def test_study_runs_and_writes_best_config(optimizer: str, config: SegmentationC
 
     best = yaml.safe_load(best_path.read_text(encoding="utf-8"))
     assert best["training"]["epochs"] == 3
+    # The W&B study view is rebuilt from disk when the study continues: same steps, budget and incumbent
+    assert (study.root.parent / f"{optimizer}_wandb.yaml").exists()
+    logger = StudyLogger(study)
+    try:
+        assert [r["step"] for r in logger.rows] == list(range(1, len(trials) + 1))
+        assert logger.rows[-1]["epochs_spent"] == sum(r["cost"] for r in reports)
+        assert logger.rows[-1]["best_val_mIoU"] == pytest.approx(max(r["extra"]["val_mIoU"] for r in reports))
+        assert {r["decision"] for r in logger.rows} <= {"new", "continue"}
+        assert all(r["start_epoch"] < r["epochs"] for r in logger.rows)
+        assert set(study.hpo.search_space) <= set(logger.rows[0])
+    finally:
+        logger.finish(None)
     assert best["model"] == config.to_dict()["model"]
     SegmentationConfig(best)  # trainable with train_segmentation as is
 
@@ -110,3 +122,35 @@ def test_ifbo_rejects_too_many_hyperparameters(config: SegmentationConfig, tmp_p
     hpo.search_space.update({f"training.extra_{i}": ParamSpec("float", 0.0, 1.0) for i in range(4)})  # 7 + 4 > 10
     with pytest.raises(ValueError, match="at most 10"):
         SegmentationStudy(config, hpo, "ifbo")
+
+
+def test_sweep_config_is_display_only(config: SegmentationConfig, tmp_path: Path) -> None:
+    config.training.freeze_encoder_epochs = 0
+    hpo = load(hpo_raw(tmp_path), config, tmp_path)
+    sweep = sweep_config(hpo, "smoke-ifbo")
+    # A local controller that is never started: W&B never schedules runs, NePS does
+    assert sweep["method"] == "custom" and sweep["controller"] == {"type": "local"}
+    assert sweep["metric"] == {"name": "val/mIoU", "goal": "maximize"}
+    params = sweep["parameters"]["training"]["parameters"]
+    assert set(params) == {name.partition(".")[2] for name in hpo.search_space}
+    assert params["lr"]["distribution"] == "log_uniform_values" and params["scheduler"] == {"values": ["poly", "cosine"]}
+
+
+def test_failing_wandb_view_does_not_lose_a_trained_step(config: SegmentationConfig, tmp_path: Path) -> None:
+    config.training.freeze_encoder_epochs = 0
+    hpo = load(hpo_raw(tmp_path), config, tmp_path)
+    study = SegmentationStudy(config, hpo, "priorband")
+
+    class BrokenLogger:
+        sweep_id = None
+
+        def log_step(self, *args, **kwargs):
+            raise RuntimeError("W&B is down")
+
+    study.logger = BrokenLogger()
+    params = {name: spec.prior for name, spec in hpo.search_space.items()}
+    first, second = tmp_path / "config_1_rung_0", tmp_path / "config_1_rung_1"
+    first.mkdir(), second.mkdir()
+    study.evaluate(first, None, "1_rung_0", epochs=1, **params)
+    result = study.evaluate(second, first, "1_rung_1", epochs=2, **params)
+    assert result["cost"] == 1 and (second / STATE_FILE).exists()

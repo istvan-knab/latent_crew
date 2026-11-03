@@ -3,7 +3,7 @@
 import contextlib
 import random
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
@@ -35,10 +35,13 @@ def autocast(device: torch.device, enabled: bool) -> contextlib.AbstractContextM
 
 
 def init_wandb(config: SegmentationConfig, run_name: str, extra_tags: List[str] = (), run_id: str | None = None,
-               group: str | None = None) -> "wandb.Run":
+               group: str | None = None, sweep_id: str | None = None, job_type: str | None = None,
+               extra_config: Dict[str, Any] | None = None) -> "wandb.Run":
     """Every run carries the task label (e.g. 2d_segmentation) as job type and first tag.
 
-    With run_id an existing run is continued (HPO resumes the same configuration in several steps).
+    With run_id an existing run is continued (HPO resumes the same configuration in several steps). sweep_id shows
+    the run in that W&B sweep. Runs are independent (reinit="create_new"), so the HPO study run stays open while
+    the configuration runs come and go.
     """
     log = config.logging
     out = Path("outputs")  # local W&B files go to outputs/wandb (gitignored, mounted in Docker)
@@ -48,11 +51,13 @@ def init_wandb(config: SegmentationConfig, run_name: str, extra_tags: List[str] 
         entity=log.entity,
         mode=log.mode,
         name=run_name,
-        job_type=config.experiment.task,
+        job_type=job_type or config.experiment.task,
         tags=config.wandb_tags + [t for t in extra_tags if t not in config.wandb_tags],
-        config=config.to_dict(),
+        config={**config.to_dict(), **(extra_config or {})},
         dir=out,
         id=run_id,
         resume="allow" if run_id else None,
         group=group,
+        reinit="create_new",
+        settings=wandb.Settings(sweep_id=sweep_id) if sweep_id else None,
     )

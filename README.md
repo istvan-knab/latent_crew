@@ -162,7 +162,12 @@ scripts/hpo_segmentation.sh configs/segmentation.yaml configs/hpo_segmentation.y
 scripts/hpo_segmentation.sh configs/segmentation.yaml configs/hpo_segmentation.yaml --optimizer priorband
 ```
 
-Results go to `outputs/hpo/<study_name>/<optimizer>/`: one directory per trial step (config, report, and `state.pt` for the newest step of each configuration), NePS summaries in `summary/`, and `best_config.yaml`, which you can train directly with `scripts/train_segmentation.sh`. Running the same command again continues the study. In W&B, each configuration is one run (resumed at every step), grouped as `<study_name>-<optimizer>` and tagged `hpo`. Details: [docs/segmentation_models.md](docs/segmentation_models.md#hyperparameter-optimisation).
+Results go to `outputs/hpo/<study_name>/<optimizer>/`: one directory per trial step (config, report, and `state.pt` for the newest step of each configuration), NePS summaries in `summary/`, and `best_config.yaml`, which you can train directly with `scripts/train_segmentation.sh`. Running the same command again continues the study. In W&B:
+
+- **Configuration runs:** one run per configuration, resumed at every step, grouped as `<study_name>-<optimizer>` and tagged `hpo`. With `logging.mode: online` they also join a W&B sweep of the same name, so the **Sweeps** page shows parallel coordinates and parameter importance. The sweep is display only: NePS picks the configurations, and W&B's own search never runs.
+- **Study run:** `<study_name>-<optimizer>-study` (job type `hpo_study`) shows how the search went. It plots the best val mIoU over the spent epochs, which is the curve to compare optimizers by, and logs each step's decision (new configuration or continuation). It also has the learning curves of all configurations and the `study/trials` table, with one row per step and its hyperparameters. `best_config.yaml` is attached as an artifact at the end.
+
+Details: [docs/segmentation_models.md](docs/segmentation_models.md#hyperparameter-optimisation).
 
 Show one sample as the model sees it (RGB, depth, label mask, overlay; `--augment` applies the training augmentation):
 

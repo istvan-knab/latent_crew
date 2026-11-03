@@ -13,13 +13,15 @@ The objective is 1 - val mIoU (ifBO needs it in [0, 1]); the test split is never
 
 import argparse
 import copy
+import json
 import logging
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict, List
 
 import neps
 import torch
+import wandb
 import yaml
 from torch.utils.data import DataLoader, Subset
 
@@ -132,6 +134,128 @@ def pipeline_space(hpo: HpoConfig, use_priors: bool) -> neps.PipelineSpace:
     return type("SegmentationSpace", (neps.PipelineSpace,), attrs)()
 
 
+def sweep_config(hpo: HpoConfig, name: str) -> Dict[str, Any]:
+    """A display-only W&B sweep: the local controller is never started, NePS picks the configurations.
+
+    W&B then shows the configuration runs with its sweep panels (parallel coordinates, parameter importance).
+    """
+    def parameter(spec: ParamSpec) -> Dict[str, Any]:
+        if spec.type == "categorical":
+            return {"values": list(spec.choices)}
+        if spec.type == "int":
+            return {"distribution": "int_uniform", "min": int(spec.lower), "max": int(spec.upper)}
+        return {"distribution": "log_uniform_values" if spec.log else "uniform", "min": float(spec.lower), "max": float(spec.upper)}
+
+    training = {name.partition(".")[2]: parameter(spec) for name, spec in hpo.search_space.items()}
+    return {"name": name, "method": "custom", "controller": {"type": "local"},
+            "metric": {"name": "val/mIoU", "goal": "maximize"}, "parameters": {"training": {"parameters": training}}}
+
+
+class StudyLogger:
+    """W&B view of a study, next to the one run per configuration.
+
+    - a display-only sweep that the configuration runs join (online mode only),
+    - a study run: best val mIoU over the spent epochs (the usual HPO trajectory plot), each step's decision
+      (new configuration or continuation), the learning curve of every configuration and a table of all trial steps.
+
+    The sweep and study run ids are stored next to the NePS directory, so continuing the study continues both.
+    """
+
+    def __init__(self, study: "SegmentationStudy"):
+        self.study = study
+        base, hpo = study.base, study.hpo
+        self.name = f"{hpo.study_name}-{study.optimizer}"
+        # Not inside the NePS root: NePS treats an existing root directory as a study to continue
+        self.ids_path = Path(hpo.output_dir) / hpo.study_name / f"{study.optimizer}_wandb.yaml"
+        ids = yaml.safe_load(self.ids_path.read_text(encoding="utf-8")) if self.ids_path.exists() else {}
+        self.rows: List[Dict[str, Any]] = []
+        earlier_runs = []
+        for trial_id, params, report, continued in self.trials_on_disk():
+            self.record(trial_id, params, report["extra"]["epochs"], report["cost"], report["extra"]["val_mIoU"], continued)
+            if report["extra"].get("wandb_run_id") not in earlier_runs + [None]:
+                earlier_runs.append(report["extra"]["wandb_run_id"])
+        self.sweep_id = ids.get("sweep_id")
+        if self.sweep_id is None and base.logging.mode == "online":
+            try:
+                # A study started before the sweep existed brings its configuration runs along
+                self.sweep_id = wandb.sweep(sweep_config(hpo, self.name), entity=base.logging.entity,
+                                            project=base.logging.project, prior_runs=earlier_runs or None)
+            except Exception as e:  # the sweep is only a view; the study must not die for it
+                print(f"Could not create the W&B sweep ({e}); configuration runs stay grouped as {self.name}")
+        self.run = init_wandb(base, f"{self.name}-study", extra_tags=["hpo", study.optimizer, "hpo_study"],
+                              run_id=ids.get("study_run_id"), group=self.name, job_type="hpo_study",
+                              extra_config={"hpo": {**asdict(hpo), "optimizer": study.optimizer}})
+        self.ids_path.parent.mkdir(parents=True, exist_ok=True)
+        self.ids_path.write_text(yaml.dump({"sweep_id": self.sweep_id, "study_run_id": self.run.id}), encoding="utf-8")
+        self.run.define_metric("study/epochs_spent")
+        self.run.define_metric("study/*", step_metric="study/epochs_spent")
+
+    def trials_on_disk(self) -> List[tuple[str, Dict[str, Any], Dict[str, Any], bool]]:
+        """Successful steps of an earlier session, in the order they finished: (trial id, params, report, continued)."""
+        trials = []
+        for report_path in (self.study.root / "configs").glob("*/report.yaml"):
+            report = yaml.safe_load(report_path.read_text(encoding="utf-8"))
+            if report.get("reported_as") != "success":
+                continue
+            trial_dir = report_path.parent
+            metadata = json.loads((trial_dir / "metadata.json").read_text(encoding="utf-8"))
+            params = yaml.safe_load((trial_dir / "config.yaml").read_text(encoding="utf-8"))
+            trials.append((metadata.get("time_end") or 0.0, metadata["id"], params, report,
+                           metadata.get("previous_trial_id") is not None))
+        return [trial[1:] for trial in sorted(trials, key=lambda trial: trial[0])]
+
+    def record(self, trial_id: str, params: Dict[str, Any], epochs: int, cost: float, miou: float, continued: bool) -> Dict[str, Any]:
+        row = {
+            "step": len(self.rows) + 1,
+            "trial": trial_id,
+            "config": int(trial_id.split("_")[0]),
+            "decision": "continue" if continued else "new",
+            "start_epoch": int(epochs - cost),
+            "epochs": int(epochs),
+            "val_mIoU": miou,
+            "best_val_mIoU": max([r["val_mIoU"] for r in self.rows] + [miou]),
+            "epochs_spent": (self.rows[-1]["epochs_spent"] if self.rows else 0) + int(cost),
+            **self.study.clean_params(params),
+        }
+        self.rows.append(row)
+        return row
+
+    def log_step(self, trial_id: str, params: Dict[str, Any], epochs: int, cost: float, miou: float, continued: bool) -> None:
+        row = self.record(trial_id, params, epochs, cost, miou, continued)
+        curves: Dict[int, List[tuple[int, float]]] = {}
+        for r in self.rows:
+            curves.setdefault(r["config"], []).append((r["epochs"], r["val_mIoU"]))
+        configs = sorted(curves)
+        self.run.log({
+            "study/epochs_spent": row["epochs_spent"],
+            "study/step": row["step"],
+            "study/val_mIoU": miou,
+            "study/best_val_mIoU": row["best_val_mIoU"],
+            "study/config": row["config"],
+            "study/continued": int(continued),
+            "study/epochs": row["epochs"],
+            "study/trials": wandb.Table(columns=list(row), data=[list(r.values()) for r in self.rows], log_mode="MUTABLE"),
+            "study/learning_curves": wandb.plot.line_series(
+                xs=[[e for e, _ in sorted(curves[c])] for c in configs], ys=[[m for _, m in sorted(curves[c])] for c in configs],
+                keys=[f"config {c}" for c in configs], title="Validation mIoU per configuration", xname="epoch"),
+        })
+        best = max(self.rows, key=lambda r: r["val_mIoU"])
+        self.run.summary.update({"best_val_mIoU": best["val_mIoU"], "best_trial": best["trial"], "best_config": best["config"],
+                                 "trial_steps": len(self.rows), "epochs_spent": row["epochs_spent"]})
+
+    def finish(self, best_config_path: Path | None) -> None:
+        """Attaches best_config.yaml to the study run (if the study produced one) and closes the run."""
+        try:
+            if best_config_path is not None and self.study.base.logging.mode != "disabled":
+                artifact = wandb.Artifact(f"{self.name}-best-config", type="config",
+                                          description="Base config with the best hyperparameters of the study",
+                                          metadata={"best_val_mIoU": self.run.summary.get("best_val_mIoU")})
+                artifact.add_file(str(best_config_path), name="best_config.yaml")
+                self.run.log_artifact(artifact)
+        finally:
+            self.run.finish()
+
+
 class SegmentationStudy:
     """Data, split and class weights shared by all trials of one study; evaluate() is the NePS objective."""
 
@@ -149,14 +273,11 @@ class SegmentationStudy:
         self.val_loader = DataLoader(self.val_set, batch_size=1, **loader_args(base, self.device))
         self._train_loaders: Dict[int, tuple[DataLoader, torch.Generator]] = {}
         self._class_weight: torch.Tensor | None = None
+        self.logger: StudyLogger | None = None  # set by run(); evaluate() also works without it
 
     def trial_config(self, params: Dict[str, Any], config_id: str) -> SegmentationConfig:
         raw = copy.deepcopy(self.base.to_dict())
-        for name, value in params.items():
-            spec = self.hpo.search_space[name]
-            # Plain Python types, so the saved config.yaml stays readable; NePS samples floats in float32
-            # precision (0.0009999999), 6 significant digits keep exactly what it chose
-            value = {"float": lambda v: float(f"{float(v):.6g}"), "int": int}.get(spec.type, lambda v: v)(value)
+        for name, value in self.clean_params(params).items():
             section, _, key = name.partition(".")
             raw[section][key] = value
         raw["training"]["epochs"] = self.hpo.max_epochs
@@ -165,6 +286,14 @@ class SegmentationStudy:
         if len(self.train_idx) < config.training.batch_size:
             raise ValueError(f"Only {len(self.train_idx)} training samples for batch_size={config.training.batch_size}")
         return config
+
+    def clean_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """The searched values as plain Python types, so saved configs and W&B tables stay readable.
+
+        NePS samples floats in float32 precision (0.0009999999); 6 significant digits keep exactly what it chose.
+        """
+        convert = {"float": lambda v: float(f"{float(v):.6g}"), "int": int}
+        return {name: convert.get(spec.type, lambda v: v)(params[name]) for name, spec in self.hpo.search_space.items()}
 
     def train_loader(self, config: SegmentationConfig) -> tuple[DataLoader, torch.Generator]:
         batch_size = config.training.batch_size
@@ -209,7 +338,8 @@ class SegmentationStudy:
 
         run = init_wandb(config, config.experiment.name, extra_tags=["hpo", self.optimizer],
                          run_id=state["wandb_run_id"] if state else None,  # one W&B run per configuration
-                         group=f"{self.hpo.study_name}-{self.optimizer}")
+                         group=f"{self.hpo.study_name}-{self.optimizer}",
+                         sweep_id=self.logger.sweep_id if self.logger else None)
         try:
             for epoch in range(start_epoch + 1, target_epoch + 1):
                 generator.manual_seed(config.experiment.seed + epoch)
@@ -223,6 +353,12 @@ class SegmentationStudy:
         torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
                     "epoch": target_epoch, "step": step, "wandb_run_id": run_id, "model_spec": config.model_spec()},
                    Path(pipeline_directory) / STATE_FILE)
+        if self.logger:
+            try:
+                self.logger.log_step(pipeline_id, params, target_epoch, target_epoch - start_epoch, metrics["mIoU"],
+                                     continued=previous_pipeline_directory is not None)
+            except Exception as e:  # a trained step must not be reported as crashed because the W&B view failed
+                print(f"W&B study logging failed for trial {pipeline_id}: {e}")
         if previous_pipeline_directory is not None:
             # Only the newest step of a configuration is ever continued; older states would just fill the disk
             (Path(previous_pipeline_directory) / STATE_FILE).unlink(missing_ok=True)
@@ -252,14 +388,20 @@ class SegmentationStudy:
         print(f"HPO {self.optimizer}: {len(self.train_set)} train / {len(self.val_set)} val samples, "
               f"{self.hpo.budget_epochs} epochs budget, fidelity {self.hpo.min_epochs}-{self.hpo.max_epochs} epochs, "
               f"results in {self.root}")
-        neps.run(
-            self.evaluate,
-            pipeline_space=pipeline_space(self.hpo, self.uses_priors()),
-            root_directory=self.root,
-            total_cost_to_spend=self.hpo.budget_epochs,
-            optimizer=(self.optimizer, self.optimizer_kwargs()),
-        )
-        return self.write_best_config()
+        self.logger, best_path = StudyLogger(self), None
+        try:
+            neps.run(
+                self.evaluate,
+                pipeline_space=pipeline_space(self.hpo, self.uses_priors()),
+                root_directory=self.root,
+                total_cost_to_spend=self.hpo.budget_epochs,
+                optimizer=(self.optimizer, self.optimizer_kwargs()),
+            )
+            best_path = self.write_best_config()
+        finally:
+            self.logger.finish(best_path)
+            self.logger = None
+        return best_path
 
     def best_trial(self) -> tuple[Dict[str, Any], Dict[str, Any]]:
         """(config, report) of the successful trial with the lowest objective, read from NePS' trial directories."""
