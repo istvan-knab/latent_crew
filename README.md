@@ -68,9 +68,10 @@ If it prints `False`, a CUDA error or an unsupported-capability warning, install
 
 **2. Before the first training run:**
 
-- **Weights & Biases:** log in once with `uv run wandb login`. For Docker, export the key in the host shell (`export WANDB_API_KEY=...`); Compose passes it into the container. Never put the key in the repo. Without W&B: `logging.mode: disabled` (or `offline`, sync later with `wandb sync`).
+- **Weights & Biases:** copy `.env.example` to `.env` in the repository root and fill in `WANDB_API_KEY` (`.env` is gitignored, never commit it). Docker Compose passes it into the container (`env_file`), and the train/test/HPO scripts load it for local runs too. Without it, the container asks for the key interactively and forgets it when it is removed. Without W&B: `logging.mode: disabled` (or `offline`, sync later with `wandb sync`).
 - **Data:** the first run downloads SUN RGB-D (~7 GB) and prepares it (~11 min); at least 40 GB of free disk space is needed (the collector checks it). Later runs reuse `data/processed/` and download nothing.
 - **Working directory:** run every command from the repository root; `dataset.root` in the config is relative to it.
+- **Shared memory:** Compose gives the container `shm_size: 8gb`, because DataLoader workers pass batches through `/dev/shm` and Docker's 64 MB default fails with `unable to allocate shared memory(shm) ... No space left on device`. With plain `docker run`, add `--shm-size=8g`.
 - **Pretrained weights:** the ImageNet encoder weights are downloaded on first use. Locally they are cached; in Docker there is no cache volume yet, so every container run downloads them again (slower start, not an error).
 
 **3. Train:**
@@ -130,7 +131,7 @@ Segmentation uses its own config, `configs/segmentation.yaml`: task label (`expe
 
 At start the script checks `data/processed/<dataset>/index.jsonl` and the files it lists. If everything is there, it is used as is; only if something is missing does it run `data/scripts/collect_data.py` for that dataset (download, verify, extract, prepare; resumable, needs ~40 GB free space). Only `sunrgbd` can be trained for now (NYU needs the NYU40 class mapping).
 
-Log in to Weights & Biases once (`uv run wandb login`) or set `WANDB_API_KEY`; set `logging.mode: disabled` to train without W&B. Every run is tagged with its task label.
+Put your Weights & Biases key in `.env` (`cp .env.example .env`, then fill in `WANDB_API_KEY`), or log in once locally with `uv run wandb login`; set `logging.mode: disabled` to train without W&B. Every run is tagged with its task label.
 
 ```bash
 scripts/train_segmentation.sh configs/segmentation.yaml

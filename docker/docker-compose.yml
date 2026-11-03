@@ -10,8 +10,14 @@ services:
       - ../data:/app/data
       - ../checkpoints:/app/checkpoints
       - ../outputs:/app/outputs
+    # W&B key and settings from the gitignored .env (template: .env.example); not passed through from the
+    # shell as well, because an unset shell variable would override the value from the file with an empty one
+    env_file:
+      - path: ../.env
+        required: false
     environment:
-      - WANDB_API_KEY # passed through from the host shell, never stored in the repo
       - WANDB_DATA_DIR=/app/outputs/wandb-data # artifact staging survives --rm for offline sync
       - WANDB_CACHE_DIR=/app/outputs/wandb-cache
     working_dir: /app
+    # DataLoader workers hand batches over through /dev/shm; Docker's 64 MB default is too small for RGB-D batches
+    shm_size: 8gb
