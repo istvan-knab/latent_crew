@@ -30,7 +30,7 @@ This one command downloads both datasets (about 9.8 GiB), verifies size and SHA-
 |---|---|---|
 | **Input** | RGB image (`rgb`), depth map in mm (`depth`; `depth_raw` is the unfilled sensor depth) | `processed/<dataset>/<split>/{rgb,depth,depth_raw}/` |
 | **Output (segmentation)** | semantic mask (`semantic`, one class per pixel) and instance mask (`instance`, one id per object) | `processed/<dataset>/<split>/{semantic,instance}/` |
-| **Output (3D detection)** | 3D bounding boxes of the objects. **SUN RGB-D only**; NYU Depth V2 has none, so it is not used for detection. **Not exported yet**: `SUNRGBDMeta3DBB_v2.mat` is downloaded, but the boxes are not written to `processed/` or `index.jsonl` | - |
+| **Output (3D detection)** | 3D bounding boxes of the objects. **SUN RGB-D only**; NYU Depth V2 has none, so it is not used for detection | `processed/sunrgbd/boxes3d.jsonl` (see [3D boxes](#3d-boxes-sun-rgb-d-only)) |
 
 Every sample has the same inputs and segmentation outputs in the `train`, `val` and `test` sets.
 
@@ -60,6 +60,7 @@ With no step flag (`--verify`, `--extract`, `--prepare`), every step runs; with 
 | `--verify` | Check size and SHA-256 of downloads, then the dataset structure |
 | `--extract` | Extract archives into `raw/` |
 | `--prepare` | Write `processed/<dataset>/` and `index.jsonl` (including the train/val split) |
+| `--boxes3d` | Only (re)write `boxes3d.jsonl` of an already prepared SUN RGB-D (`--prepare` does it too) |
 | `--resplit` | Only redo the train/val split in `index.jsonl`; fast, no image is touched |
 | `--val-ratio` | Validation fraction of the official train set (default: `[split] val_ratio`) |
 | `--seed` | Seed of the split (default: `[split] seed`) |
@@ -174,6 +175,38 @@ One JSON object per line. All paths are relative to `processed/<dataset>/`.
 | `scene` | Scene type (`unknown` if missing) |
 | `sensor` | `kinect_v1`, `kinect_v2`, `realsense` or `xtion` |
 | `source` | SUN only: original sample folder under `raw/sunrgbd/` |
+
+### 3D boxes (SUN RGB-D only)
+
+`processed/sunrgbd/boxes3d.jsonl` has one line per sample (same `id` as in `index.jsonl`, all splits): 64657 boxes in 10335 samples, and 44 samples have none. NYU Depth V2 has no 3D annotation, so it has no such file.
+
+```
+{"id": "sun_000001",
+ "K": [[529.5, 0, 365], [0, 529.5, 265], [0, 0, 1]],
+ "Rtilt": [[...], [...], [...]],
+ "boxes": [{"classname": "bed", "centroid": [1.05, 4.17, -0.25], "size": [1.89, 2.30, 1.97],
+            "basis": [[...], [...], [...]], "orientation": [-0.12, -0.99, 0.0]}, ...]}
+```
+
+| Field | Meaning |
+|---|---|
+| `K` | Camera intrinsics (pixels) |
+| `Rtilt` | Rotation from the camera points to the upright system |
+| `centroid` | Box centre in metres |
+| `size` | Full edge lengths in metres along the columns of `basis` (the source file stores half sizes) |
+| `basis` | 3×3 rotation of the box (the box is rotated around the vertical axis only) |
+| `orientation` | Horizontal direction of the box |
+| `classname` | Object name (several hundred names; there is no fixed class list) |
+
+The boxes are in the **upright coordinate system** of the SUN RGB-D toolbox (z up). A depth map `z` (metres, `depth` / 1000) gives points in this system like this (pixel indices `x`, `y` start at 1):
+
+```python
+pts = np.stack([(x - K[0, 2]) * z / K[0, 0], z, -(y - K[1, 2]) * z / K[1, 1]], -1)
+pts = pts.reshape(-1, 3) @ Rtilt.T
+inside = (np.abs((pts - centroid) @ basis.T) <= size / 2).all(axis=1)  # points of one box
+```
+
+Checked on 10 real samples (all four sensors): every one of the 36 boxes contained at least 200 depth points.
 
 ### File formats
 

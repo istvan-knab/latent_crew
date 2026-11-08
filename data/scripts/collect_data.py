@@ -17,6 +17,8 @@ def main() -> int:
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--extract", action="store_true")
     parser.add_argument("--prepare", action="store_true")
+    parser.add_argument("--boxes3d", action="store_true",
+                        help="only (re)write boxes3d.jsonl of an already prepared SUN RGB-D")
     parser.add_argument("--resplit", action="store_true",
                         help="only redo the train/val split in index.jsonl (fast, no file is touched)")
     parser.add_argument("--val-ratio", type=float,
@@ -40,9 +42,12 @@ def main() -> int:
         collector.cfg.seed = args.seed
 
     try:
-        if args.resplit:
+        if args.resplit or args.boxes3d:
             for name in datasets:
-                collector.resplit(name)
+                if args.resplit:
+                    collector.resplit(name)
+                if args.boxes3d:
+                    collector.export_boxes3d(name)
         elif args.verify_only:
             for name in datasets:
                 for spec in collector.manifest[name]["files"]:

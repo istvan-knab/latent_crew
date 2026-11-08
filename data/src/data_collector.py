@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from .config import load_config
 from .extractors import (SUN_SENSORS, h5_strings, read_nyu_sample, read_sun_instances,
-                         read_sun_meta, read_sun_split, safe_extract_zip, sun_depth_to_mm)
+                         read_sun_boxes3d, read_sun_meta, read_sun_split, safe_extract_zip, sun_depth_to_mm)
 from .utils import (copy_file, free_space_bytes, get_logger, human_size, save_image,
                     sha256_of)
 from .validators import ValidationError, check_mat, check_size, check_zip
@@ -390,6 +390,40 @@ class DataCollector:
                  dataset, len(rows), counts["train"], counts["val"], counts["test"])
         return index
 
+    def export_boxes3d(self, dataset: str = "sunrgbd") -> Path | None:
+        """Write processed/sunrgbd/boxes3d.jsonl: the 3D boxes of every sample (SUN RGB-D only).
+
+        NYU Depth V2 has no 3D box annotation, so nothing is written for it.
+        """
+        if dataset != "sunrgbd":
+            log.info("%s has no 3D boxes, nothing to export", dataset)
+            return None
+        out = self.cfg.processed / "sunrgbd"
+        index, meta = out / "index.jsonl", self.cfg.raw / "sunrgbd" / "metadata" / "SUNRGBDMeta3DBB_v2.mat"
+        for path in (index, meta):
+            if not path.exists():
+                raise ValidationError(f"Missing file: {path} (run --prepare first)")
+        with open(index, encoding="utf-8") as fh:
+            ids = {r["source"]: r["id"] for r in map(json.loads, fh)}
+        boxes = read_sun_boxes3d(meta)
+        unknown = [k for k in boxes if k not in ids]
+        if unknown:
+            log.warning("%d samples of the 3D box file are not in the index, e.g. %s",
+                        len(unknown), unknown[:3])
+        target = out / "boxes3d.jsonl"
+        tmp = target.with_suffix(".tmp")
+        n_boxes = 0
+        with open(tmp, "w", encoding="utf-8") as fh:
+            for key, sample_id in ids.items():
+                entry = boxes.get(key)
+                if entry is None:
+                    raise ValidationError(f"No 3D box entry for {sample_id} ({key})")
+                n_boxes += len(entry["boxes"])
+                fh.write(json.dumps({"id": sample_id, **entry}) + "\n")
+        tmp.replace(target)
+        log.info("sunrgbd: %d 3D boxes of %d samples -> %s", n_boxes, len(ids), target)
+        return target
+
     def resplit(self, dataset: str, val_ratio: float | None = None,
                 seed: int | None = None) -> Path:
         """Change the train/val ratio of an already prepared dataset; only index.jsonl changes."""
@@ -495,4 +529,6 @@ class DataCollector:
                 save_image(f[labels[i]][()].T.astype(np.uint8), out / row["semantic"])
                 save_image(read_sun_instances(s["seg"]), out / row["instance"])
 
-        return self._write_index("sunrgbd", rows, classes)
+        index = self._write_index("sunrgbd", rows, classes)
+        self.export_boxes3d("sunrgbd")
+        return index
