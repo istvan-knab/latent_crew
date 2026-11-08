@@ -18,6 +18,8 @@ class Config:
     chunk_size_mb: int
     timeout_s: int
     retries: int
+    val_ratio: float
+    seed: int
 
 
 def load_config(data_root: Path | str) -> Config:
@@ -27,6 +29,7 @@ def load_config(data_root: Path | str) -> Config:
 
     paths = toml["paths"]
     collect = toml["collect"]
+    split = toml.get("split", {})
     return Config(
         data_root=data_root,
         manifest=data_root / paths["manifest"],
@@ -40,4 +43,6 @@ def load_config(data_root: Path | str) -> Config:
         chunk_size_mb=collect["chunk_size_mb"],
         timeout_s=collect["timeout_s"],
         retries=collect["retries"],
+        val_ratio=split.get("val_ratio", 0.1),
+        seed=split.get("seed", 42),
     )
