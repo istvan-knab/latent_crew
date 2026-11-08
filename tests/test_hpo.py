@@ -154,3 +154,18 @@ def test_failing_wandb_view_does_not_lose_a_trained_step(config: SegmentationCon
     study.evaluate(first, None, "1_rung_0", epochs=1, **params)
     result = study.evaluate(second, first, "1_rung_1", epochs=2, **params)
     assert result["cost"] == 1 and (second / STATE_FILE).exists()
+
+
+def test_continuing_with_an_edited_space_is_refused(config: SegmentationConfig, tmp_path: Path) -> None:
+    config.training.freeze_encoder_epochs = 0
+    raw = hpo_raw(tmp_path)
+    study = SegmentationStudy(config, load(raw, config, tmp_path), "priorband")
+    assert study.check_space_unchanged() is False  # new study: NePS gets the space
+    study.root.mkdir(parents=True)
+    (study.root / "pipeline_space.pkl").touch()
+    assert study.check_space_unchanged() is True  # unchanged: NePS loads its own copy from disk
+
+    raw["fidelity"]["max_epochs"] = 4
+    edited = SegmentationStudy(config, load(raw, config, tmp_path), "priorband")
+    with pytest.raises(ValueError, match="changed since"):
+        edited.check_space_unchanged()

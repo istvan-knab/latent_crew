@@ -344,7 +344,9 @@ class SegmentationStudy:
             for epoch in range(start_epoch + 1, target_epoch + 1):
                 generator.manual_seed(config.experiment.seed + epoch)
                 step = train_one_epoch(model, loader, optimizer, scheduler, criterion, config, self.device, epoch, step, run)
-            metrics = validate(model, self.val_loader, self.val_set, self.val_base, config, self.device, target_epoch, step, run, 0)
+            # Same sample images as plain training (logging.num_sample_images), once per step of the configuration
+            metrics = validate(model, self.val_loader, self.val_set, self.val_base, config, self.device, target_epoch, step, run,
+                               config.logging.num_sample_images)
             run.summary["hpo/epochs"] = target_epoch
             run_id = run.id
         finally:
@@ -388,11 +390,14 @@ class SegmentationStudy:
         print(f"HPO {self.optimizer}: {len(self.train_set)} train / {len(self.val_set)} val samples, "
               f"{self.hpo.budget_epochs} epochs budget, fidelity {self.hpo.min_epochs}-{self.hpo.max_epochs} epochs, "
               f"results in {self.root}")
+        continuing = self.check_space_unchanged()
         self.logger, best_path = StudyLogger(self), None
         try:
             neps.run(
                 self.evaluate,
-                pipeline_space=pipeline_space(self.hpo, self.uses_priors()),
+                # NePS compares a continued study's space with the one on disk in a form that never matches across
+                # processes, so a continued study loads it from disk; check_space_unchanged() guards against edits
+                pipeline_space=None if continuing else pipeline_space(self.hpo, self.uses_priors()),
                 root_directory=self.root,
                 total_cost_to_spend=self.hpo.budget_epochs,
                 optimizer=(self.optimizer, self.optimizer_kwargs()),
@@ -402,6 +407,24 @@ class SegmentationStudy:
             self.logger.finish(best_path)
             self.logger = None
         return best_path
+
+    def check_space_unchanged(self) -> bool:
+        """Stores the search space next to the study and refuses to continue a study with an edited one.
+
+        Returns whether an existing study is being continued.
+        """
+        space = {"search_space": {name: asdict(spec) for name, spec in self.hpo.search_space.items()},
+                 "fidelity": {"min_epochs": self.hpo.min_epochs, "max_epochs": self.hpo.max_epochs},
+                 "use_priors": self.uses_priors()}
+        # Next to (not inside) the NePS root, which must not exist before NePS creates it
+        path = self.root.parent / f"{self.optimizer}_space.yaml"
+        continuing = (self.root / "pipeline_space.pkl").exists()
+        if continuing and path.exists() and yaml.safe_load(path.read_text(encoding="utf-8")) != space:
+            raise ValueError(f"search_space, fidelity or ifbo.use_priors changed since {self.root} was started "
+                             f"(saved in {path}). Use a new study_name, or delete {self.root} to start over.")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.dump(space, sort_keys=False), encoding="utf-8")
+        return continuing
 
     def best_trial(self) -> tuple[Dict[str, Any], Dict[str, Any]]:
         """(config, report) of the successful trial with the lowest objective, read from NePS' trial directories."""
