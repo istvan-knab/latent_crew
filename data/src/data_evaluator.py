@@ -105,9 +105,10 @@ def _split_table(rows: list[dict], key: str) -> dict:
     order = sorted(table, key=lambda v: -sum(table[v].values()))
     return {
         "values": len(table),
-        "counts": {v: {"train": table[v]["train"], "test": table[v]["test"]} for v in order},
+        "counts": {v: {"train": table[v]["train"], "val": table[v]["val"], "test": table[v]["test"]}
+                   for v in order},
         "train_only": [v for v in order if not table[v]["test"]],
-        "test_only": [v for v in order if not table[v]["train"]],
+        "test_only": [v for v in order if not (table[v]["train"] or table[v]["val"])],
     }
 
 
@@ -216,7 +217,8 @@ class DataEvaluator:
         mine = [p for p in self.problems if p["dataset"] == dataset]
         samples = parts["structure"]["samples"]
         return {
-            "samples": samples["total"], "train": samples["train"], "test": samples["test"],
+            "samples": samples["total"], "train": samples["train"], "val": samples["val"],
+            "test": samples["test"],
             "flagged_samples": len({p["id"] for p in mine}),
             "errors": len({p["id"] for p in mine if p["severity"] == "error"}),
             "warnings": len({p["id"] for p in mine if p["severity"] == "warning"}),
@@ -277,7 +279,7 @@ class DataEvaluator:
         splits = Counter(r["split"] for r in rows)
         ids = Counter(r["id"] for r in rows)
         paths = Counter(r[k] for r in rows for k in PATH_KEYS if k in r)
-        unknown_split = [r["id"] for r in rows if r["split"] not in ("train", "test")]
+        unknown_split = [r["id"] for r in rows if r["split"] not in ("train", "val", "test")]
         for sample_id in unknown_split:
             self._problem(dataset, sample_id, "structure", "unknown_split", "unknown split")
         for sample_id, c in ids.items():
@@ -336,7 +338,7 @@ class DataEvaluator:
                 "processed_files": len(processed_files),
             },
             "samples": {
-                "total": n, "train": splits["train"], "test": splits["test"],
+                "total": n, "train": splits["train"], "val": splits["val"], "test": splits["test"],
                 "train_ratio": round(splits["train"] / n, 3) if n else None,
             },
             "index_issues": {
@@ -734,7 +736,8 @@ class DataEvaluator:
                 hashes[digest] = r["id"]
             bits = (small[:, 1:] > small[:, :-1]).ravel()
             dhashes.append(np.packbits(bits))
-            splits.append(r["split"])
+            # val is part of the official train set, so it counts as train here
+            splits.append("test" if r["split"] == "test" else "train")
             ids.append(r["id"])
 
             shift = _best_shift(gray, depth)
@@ -856,9 +859,9 @@ def _markdown(result: dict) -> str:
              f"Runtime {result['runtime_s']} s. Full details: `data_evaluation.json`; "
              f"flagged samples: `problematic_samples.jsonl`.", ""]
     lines += ["## Summary", ""]
-    lines += _table(["dataset", "samples", "train", "test", "flagged samples", "errors",
+    lines += _table(["dataset", "samples", "train", "val", "test", "flagged samples", "errors",
                      "warnings"],
-                    [[name, s["samples"], s["train"], s["test"], s["flagged_samples"],
+                    [[name, s["samples"], s["train"], s["val"], s["test"], s["flagged_samples"],
                       s["errors"], s["warnings"]] for name, s in result["summary"].items()])
 
     for name, parts in result["datasets"].items():
@@ -920,8 +923,8 @@ def _markdown(result: dict) -> str:
         lines += ["### Consistency", ""]
         for key in ("sensors", "scenes"):
             tab = al[key]
-            lines += _table([key[:-1], "train", "test"],
-                            [[v, c["train"], c["test"]] for v, c in tab["counts"].items()])
+            lines += _table([key[:-1], "train", "val", "test"],
+                            [[v, c["train"], c["val"], c["test"]] for v, c in tab["counts"].items()])
             if tab["train_only"] or tab["test_only"]:
                 lines += [f"Only in train: {', '.join(tab['train_only']) or '-'}. "
                           f"Only in test: {', '.join(tab['test_only']) or '-'}.", ""]

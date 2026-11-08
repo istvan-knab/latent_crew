@@ -17,6 +17,12 @@ def main() -> int:
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--extract", action="store_true")
     parser.add_argument("--prepare", action="store_true")
+    parser.add_argument("--resplit", action="store_true",
+                        help="only redo the train/val split in index.jsonl (fast, no file is touched)")
+    parser.add_argument("--val-ratio", type=float,
+                        help="fraction of the official train set used for validation "
+                             "(default: [split] val_ratio in config.toml)")
+    parser.add_argument("--seed", type=int, help="split seed (default: [split] seed)")
     parser.add_argument("--verify-only", action="store_true")
     parser.add_argument("--include-raw-nyu", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -27,8 +33,17 @@ def main() -> int:
     # No step flag given: run every step
     run_all = not (args.verify or args.extract or args.prepare)
 
+    # The split settings apply to --prepare and --resplit
+    if args.val_ratio is not None:
+        collector.cfg.val_ratio = args.val_ratio
+    if args.seed is not None:
+        collector.cfg.seed = args.seed
+
     try:
-        if args.verify_only:
+        if args.resplit:
+            for name in datasets:
+                collector.resplit(name)
+        elif args.verify_only:
             for name in datasets:
                 for spec in collector.manifest[name]["files"]:
                     collector.verify_download(collector.cfg.downloads / spec["download"], spec)

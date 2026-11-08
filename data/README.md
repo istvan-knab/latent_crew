@@ -1,6 +1,38 @@
 # Data
 
-Download, verification and preparation of the SUN RGB-D (V1) and NYU Depth V2 (labeled) datasets.
+Download, verification and preparation of the SUN RGB-D (V1) and NYU Depth V2 (labeled) datasets for 3D object detection and segmentation.
+
+| Dataset | Segmentation (semantic, instance) | 3D object detection (3D bounding boxes) |
+|---|---|---|
+| SUN RGB-D | yes | **yes**: the only suitable dataset |
+| NYU Depth V2 (labeled) | yes | no: it has no 3D box annotations |
+
+## Contents
+
+- [Download the data](#download-the-data)
+- [Inputs and outputs](#inputs-and-outputs)
+- [Train / validation / test split](#train--validation--test-split)
+- [Processed data](#processed-data)
+- [Evaluation report](#evaluation-report)
+
+## Download the data
+
+```
+pip install -r data/requirements.txt
+python data/scripts/collect_data.py
+```
+
+This one command downloads both datasets (about 9.8 GiB), verifies size and SHA-256, extracts them and writes the training-ready files to `data/processed/` (about 3.5 GiB). The sources and checksums are in `manifests/datasets.json`; the script is `scripts/collect_data.py`. Details and options are in [Usage](#usage).
+
+## Inputs and outputs
+
+| | What | Where |
+|---|---|---|
+| **Input** | RGB image (`rgb`), depth map in mm (`depth`; `depth_raw` is the unfilled sensor depth) | `processed/<dataset>/<split>/{rgb,depth,depth_raw}/` |
+| **Output (segmentation)** | semantic mask (`semantic`, one class per pixel) and instance mask (`instance`, one id per object) | `processed/<dataset>/<split>/{semantic,instance}/` |
+| **Output (3D detection)** | 3D bounding boxes of the objects. **SUN RGB-D only**; NYU Depth V2 has none, so it is not used for detection. **Not exported yet**: `SUNRGBDMeta3DBB_v2.mat` is downloaded, but the boxes are not written to `processed/` or `index.jsonl` | - |
+
+Every sample has the same inputs and segmentation outputs in the `train`, `val` and `test` sets.
 
 ## Setup
 
@@ -27,7 +59,10 @@ With no step flag (`--verify`, `--extract`, `--prepare`), every step runs; with 
 | `--datasets` | Datasets to process (default: `[collect].datasets` in `config.toml`) |
 | `--verify` | Check size and SHA-256 of downloads, then the dataset structure |
 | `--extract` | Extract archives into `raw/` |
-| `--prepare` | Write `processed/<dataset>/` and `index.jsonl` |
+| `--prepare` | Write `processed/<dataset>/` and `index.jsonl` (including the train/val split) |
+| `--resplit` | Only redo the train/val split in `index.jsonl`; fast, no image is touched |
+| `--val-ratio` | Validation fraction of the official train set (default: `[split] val_ratio`) |
+| `--seed` | Seed of the split (default: `[split] seed`) |
 | `--verify-only` | Check downloads, dataset structure and index; writes nothing |
 | `--force` | Download and extract again |
 | `--include-raw-nyu` | Not supported: stops with an error (see [Raw NYU](#raw-nyu)) |
@@ -76,22 +111,47 @@ Measured on one machine, only as a rough guide:
 
 The collector needs `min_free_space_gb` (40 GB) of free disk space. Actual usage: downloads 9.8 GiB (SUN 7.0, NYU 2.8), processed 3.5 GiB (SUN 3.1, NYU 0.4).
 
+## Train / validation / test split
+
+The datasets only come with an official train/test split. The validation set is a random part of the **official train** set; the official test set is never changed.
+
+- The ratio is `[split] val_ratio` in `config.toml` (default `0.1`, i.e. 10 % of train); `0` means no validation set.
+- The choice is random but fixed by `[split] seed` (default `42`): the same ratio and seed always give the same validation set.
+- Only the `split` field in `index.jsonl` changes. The validation files stay in `train/`, so nothing is moved or copied, and changing the ratio takes seconds.
+
+Change the ratio on already prepared data, for example 20 % validation or a different seed:
+
+```
+python data/scripts/collect_data.py --resplit --val-ratio 0.2
+python data/scripts/collect_data.py --resplit --val-ratio 0.2 --seed 7
+```
+
+or set `val_ratio` in `config.toml` and run `--prepare` or `--resplit`. To use the sets, read `index.jsonl` and filter on `split` (see the example below).
+
+SUN RGB-D and NYU Depth V2 contain many similar frames from the same scene, so a random split can put near-identical images into train and validation. If this matters for model selection, check it with `data_evaluation.py` (near-duplicate section).
+
 ## Processed data
 
 ```
 processed/<dataset>/
   index.jsonl
   classes.json
-  train/{rgb,depth,depth_raw,semantic,instance}/<id>.<ext>
+  train/{rgb,depth,depth_raw,semantic,instance}/<id>.<ext>   (also holds the val samples)
   test/...
 ```
 
-| Dataset | Samples | Train | Test | Resolution (W×H) |
-|---|---|---|---|---|
-| `sunrgbd` | 10335 | 5285 | 5050 | per sensor: kv2 730×530, xtion 591×441, kv1 561×427, realsense 681×531 |
-| `nyu_depth_v2` | 1449 | 795 | 654 | 640×480 |
+| Dataset | Samples | Official train | Train | Val | Test | Resolution (W×H) |
+|---|---|---|---|---|---|---|
+| `sunrgbd` | 10335 | 5285 | 4757 | 528 | 5050 | per sensor: kv2 730×530, xtion 591×441, kv1 561×427, realsense 681×531 |
+| `nyu_depth_v2` | 1449 | 795 | 715 | 80 | 654 | 640×480 |
 
-Splits are the official ones (`allsplit.mat` for SUN, `splits.mat` for NYU). File names are the original sample numbers (1-based), so e.g. NYU `train/` starts at `000003`.
+Train and val are the default `val_ratio = 0.1` of the official train set. The test sets are the official ones (`allsplit.mat` for SUN, `splits.mat` for NYU). File names are the original sample numbers (1-based), so e.g. NYU `train/` starts at `000003`.
+
+```python
+import json
+rows = [json.loads(line) for line in open("data/processed/nyu_depth_v2/index.jsonl")]
+val = [r for r in rows if r["split"] == "val"]  # paths in r are relative to processed/<dataset>/
+```
 
 ### Index fields
 
@@ -108,7 +168,7 @@ One JSON object per line. All paths are relative to `processed/<dataset>/`.
 | Field | Meaning |
 |---|---|
 | `id` | `sun_NNNNNN` or `nyu_NNNNNN` |
-| `split` | `train` or `test` |
+| `split` | `train`, `val` or `test`; `val` rows point to files in `train/` |
 | `rgb`, `depth`, `semantic`, `instance` | Image paths |
 | `depth_raw` | Raw sensor depth (holes = 0) |
 | `scene` | Scene type (`unknown` if missing) |

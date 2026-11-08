@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen)
 
-3D object detection and segmentation on the SUN RGB-D and NYU Depth V2 datasets.
+**Team name:** Latent Crew
 
 ## Team
 
@@ -15,13 +15,35 @@
 | Botond Veress | H2J0GS |
 | Agoston Horvath | GI41M1 |
 
+## Project
+
+Latent Crew builds 3D object detection and segmentation for indoor scenes on two RGB-D datasets, **SUN RGB-D** and **NYU Depth V2**. Only SUN RGB-D has 3D bounding box annotations, so it is the only one suitable for 3D object detection; NYU Depth V2 has semantic and instance masks only and is used for segmentation. The central idea is that one camera stream can be processed in several ways, so that different kinds of information are extracted from the same input: what objects are in the scene (semantic and instance segmentation) and where they are in 3D (3D bounding boxes).
+
+Plan:
+
+1. **Data**: download and prepare both datasets with train, validation and test inputs (RGB, depth) and outputs (segmentation masks for both datasets, 3D boxes for SUN RGB-D only).
+2. **Models with transfer learning**: start from pretrained backbones to keep the computational cost low.
+3. **Training and optimisation**: train the models, and improve them with [Weights & Biases](https://wandb.ai) sweeps and different hyperparameter optimisation methods.
+4. **Simulation demo**: put the algorithms on a MicroDuck robot trained with a PPO policy in Isaac Sim. While the robot is steered through the built environment, it detects and segments the objects around it. If time runs out, the same is shown on a few pre-recorded videos.
+
+## Milestones
+
+| Milestone | Content | Where | Status |
+| --- | --- | --- | --- |
+| 1 | Data sources and download scripts, data exploration and visualisation, train/validation/test data preparation | Notebook: [`docs/milestones/milestone_1.ipynb`](docs/milestones/milestone_1.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/istvan-knab/latent_crew/blob/main/docs/milestones/milestone_1.ipynb)<br>Data code and description: [`data/`](data/README.md) | Done |
+| 2 | - | - | Coming soon |
+
 ## Repo structure
 
 ```
+data/       Dataset download, preparation and evaluation scripts; data/README.md describes the data
+docs/       Documentation; docs/milestones/ holds one notebook per milestone
 docker/     Dockerfile, docker-compose.yml
 scripts/    entry-point shell scripts (train/test per task, full app)
 configs/    YAML config files
 src/        latent_crew Python package (data, models, training, evaluation, utils)
+app/        web app
+temp/       2D MNIST baseline classifier (TensorFlow, W&B) used to try out the training workflow
 ```
 
 ## Software environment

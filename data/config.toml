@@ -6,6 +6,13 @@ raw = "raw"
 processed = "processed"
 reports = "reports"
 
+[split]
+# Fraction of the official train set that becomes the validation set (0 = no validation split).
+# The official test split is never changed.
+val_ratio = 0.1
+# Seed of the random choice: the same seed always gives the same validation set
+seed = 42
+
 [collect]
 # Datasets downloaded by default
 datasets = ["sunrgbd", "nyu_depth_v2"]

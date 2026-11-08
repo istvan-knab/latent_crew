@@ -1,5 +1,6 @@
 """DataCollector: download, verify and prepare the datasets."""
 import json
+import random
 import shutil
 import time
 import zipfile
@@ -24,6 +25,25 @@ log = get_logger(__name__)
 
 # Index fields that hold file paths (relative to processed/<dataset>/)
 PATH_KEYS = ("rgb", "depth", "depth_raw", "semantic", "instance")
+
+
+def assign_val_split(rows: list[dict], val_ratio: float, seed: int) -> int:
+    """Mark a random part of the official train samples as split "val"; returns its size.
+
+    Only the "split" field changes: the files stay in train/, so no file is moved or copied.
+    Existing "val" rows are reset first, so the result depends only on val_ratio and seed.
+    """
+    if not 0 <= val_ratio < 1:
+        raise ValidationError(f"val_ratio must be in [0, 1), got {val_ratio}")
+    for r in rows:
+        if r["split"] == "val":
+            r["split"] = "train"
+    train_ids = sorted(r["id"] for r in rows if r["split"] == "train")
+    val_ids = set(random.Random(seed).sample(train_ids, round(len(train_ids) * val_ratio)))
+    for r in rows:
+        if r["id"] in val_ids:
+            r["split"] = "val"
+    return len(val_ids)
 
 
 class DataCollector:
@@ -338,7 +358,10 @@ class DataCollector:
         return {"samples": n, "train": n - n_test, "test": n_test}
 
     def prepare_dataset(self, dataset: str) -> Path:
-        """Convert raw/ data into processed/<dataset>/{train,test} plus index.jsonl."""
+        """Convert raw/ data into processed/<dataset>/{train,test} plus index.jsonl.
+
+        index.jsonl also marks a validation part of train (see assign_val_split).
+        """
         if dataset == "nyu_depth_v2":
             return self._prepare_nyu()
         if dataset == "sunrgbd":
@@ -349,17 +372,35 @@ class DataCollector:
         """Write classes.json and index.jsonl (via a temp file) and log the split sizes."""
         out = self.cfg.processed / dataset
         (out / "classes.json").write_text(json.dumps(classes, indent=2), encoding="utf-8")
-        index = out / "index.jsonl"
+        assign_val_split(rows, self.cfg.val_ratio, self.cfg.seed)
+        index = self._write_rows(dataset, rows)
+        log.info("%s prepared -> %s", dataset, index)
+        return index
+
+    def _write_rows(self, dataset: str, rows: list[dict]) -> Path:
+        """Write index.jsonl via a temp file and log the split sizes."""
+        index = self.cfg.processed / dataset / "index.jsonl"
         tmp = index.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as fh:
             for row in rows:
                 fh.write(json.dumps(row) + "\n")
         tmp.replace(index)
-
-        n_test = sum(r["split"] == "test" for r in rows)
-        log.info("%s prepared: %d samples (%d train, %d test) -> %s",
-                 dataset, len(rows), len(rows) - n_test, n_test, index)
+        counts = {s: sum(r["split"] == s for r in rows) for s in ("train", "val", "test")}
+        log.info("%s: %d samples (%d train, %d val, %d test)",
+                 dataset, len(rows), counts["train"], counts["val"], counts["test"])
         return index
+
+    def resplit(self, dataset: str, val_ratio: float | None = None,
+                seed: int | None = None) -> Path:
+        """Change the train/val ratio of an already prepared dataset; only index.jsonl changes."""
+        index = self.cfg.processed / dataset / "index.jsonl"
+        if not index.exists():
+            raise ValidationError(f"{dataset}: no index.jsonl yet (run --prepare first)")
+        with open(index, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh]
+        assign_val_split(rows, self.cfg.val_ratio if val_ratio is None else val_ratio,
+                         self.cfg.seed if seed is None else seed)
+        return self._write_rows(dataset, rows)
 
     def _prepare_nyu(self) -> Path:
         raw = self.cfg.raw / "nyu_depth_v2"
