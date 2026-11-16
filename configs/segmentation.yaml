@@ -48,5 +48,5 @@ logging: # Weights & Biases
   project: latent-crew
   entity: null # W&B team or user name, null = your default entity
   mode: online # online | offline (sync later with `wandb sync`) | disabled
-  num_sample_images: 4 # validation images (RGB, depth, label, prediction) logged at every evaluation
+  num_sample_images: 4 # fixed validation images (RGB, depth, label, prediction) in the samples/ section
   tags: [] # extra tags, e.g. [rgbd, baseline]

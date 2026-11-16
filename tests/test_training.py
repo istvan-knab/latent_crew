@@ -63,8 +63,10 @@ def test_training_logs_recoverable_model_artifact(config: SegmentationConfig, mo
     monkeypatch.setattr(wandb.Run, "log_artifact", capture)
     best = train(config)
 
-    assert len(captured) == 1
-    artifact, files, run_id = captured[0]
+    # W&B also stores logged tables (the per-class IoU chart) as artifacts; only the model artifact matters here
+    models = [entry for entry in captured if entry[0].type == "model"]
+    assert len(models) == 1
+    artifact, files, run_id = models[0]
     assert artifact.type == "model"
     assert set(files) == {"best.pt", "last.pt", "config.yaml"}
     assert run_id in artifact.name
@@ -142,3 +144,26 @@ def test_lr_schedule_warms_up_then_decays(scheduler: str) -> None:
     assert factor(0) == pytest.approx(0.1) and factor(9) == pytest.approx(1.0)
     assert factor(10) == pytest.approx(1.0) and factor(110) == pytest.approx(0.0, abs=1e-9)
     assert factor(50) > factor(90)
+
+
+def test_training_logs_the_three_sections(config: SegmentationConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every validated epoch logs loss/train + loss/val, the metrics/ keys and the samples/ images."""
+    import latent_crew.training.train_segmentation as trainer_module
+    from latent_crew.utils.wandb_sections import WandbSections
+
+    logged = {}
+
+    class RecordingSections(WandbSections):
+        """Records every logged key, also when W&B itself is disabled."""
+
+        def __init__(self, run):
+            super().__init__(run)
+            log = run.log
+            self.run = type("RecordingRun", (), {"log": lambda _, data, **kw: (logged.update(data), log(data, **kw))})()
+
+    monkeypatch.setattr(trainer_module, "WandbSections", RecordingSections)
+    train(config)
+    for key in ("loss/train", "loss/val", "metrics/mIoU", "metrics/pixel_accuracy", "metrics/mean_class_accuracy",
+                "metrics/per_class_iou", "samples/validation", "optim/train_loss_iter"):
+        assert key in logged, key
+    assert logged["loss/val"] > 0 and logged["loss/train"] > 0

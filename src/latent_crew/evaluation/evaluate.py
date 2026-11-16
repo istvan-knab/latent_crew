@@ -1,6 +1,6 @@
 """Evaluation loop and W&B sample images, shared by training (validation) and test_segmentation."""
 
-from typing import List
+from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import torch
@@ -22,15 +22,28 @@ def evaluate(
     ignore_index: int,
     device: torch.device,
     amp: bool,
-) -> ConfusionMatrix:
-    """Full-resolution evaluation; the loader must use batch_size=1 because image sizes differ."""
+    criterion: nn.Module | None = None,
+) -> Tuple[ConfusionMatrix, float | None]:
+    """Full-resolution evaluation; the loader must use batch_size=1 because image sizes differ.
+
+    Returns the accumulated confusion matrix and, if a `criterion` is given, the mean loss over the images
+    (images whose pixels are all ignored have no loss and are skipped).
+    """
     model.eval()
     confusion = ConfusionMatrix(num_classes, ignore_index)
+    loss_sum, loss_count = 0.0, 0
     for batch in loader:
+        image = batch["image"].to(device, non_blocking=True)
+        mask = batch["mask"].to(device, non_blocking=True)
         with autocast(device, amp):
-            logits = model(batch["image"].to(device, non_blocking=True))
-        confusion.update(logits.float(), batch["mask"].to(device, non_blocking=True))
-    return confusion
+            logits = model(image)
+        logits = logits.float()
+        confusion.update(logits, mask)
+        if criterion is not None and (mask != ignore_index).any():
+            loss_sum += criterion(logits, mask).item()
+            loss_count += 1
+    mean_loss = loss_sum / loss_count if criterion is not None and loss_count else None
+    return confusion, mean_loss
 
 
 @torch.no_grad()

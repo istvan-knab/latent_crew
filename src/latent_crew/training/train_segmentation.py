@@ -26,6 +26,7 @@ from latent_crew.data.segmentation_dataset import SegmentationDataset
 from latent_crew.evaluation.evaluate import evaluate, sample_images
 from latent_crew.models.segmentation import build_segmentation_model, param_groups
 from latent_crew.utils.runtime import autocast, init_wandb, resolve_device, seed_everything
+from latent_crew.utils.wandb_sections import WandbSections
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -153,6 +154,7 @@ class SegmentationTrainer:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         c.save_yaml(self.out_dir / "config.yaml")
         self.run = init_wandb(c, c.experiment.name)
+        self.logger = WandbSections(self.run)  # loss/, metrics/, samples/ and optim/ sections
         self.run.summary["train_samples"] = len(self.train_set)
         self.run.summary["val_samples"] = len(self.val_set)
         print(f"{len(self.train_set)} train / {len(self.val_set)} val samples, {c.model.encoder} + {c.model.decoder}, "
@@ -161,10 +163,12 @@ class SegmentationTrainer:
         best_miou, best_path = -1.0, self.out_dir / "best.pt"
         try:
             for epoch in range(1, t.epochs + 1):
-                self.train_one_epoch(epoch)
+                train_loss = self.train_one_epoch(epoch)
                 if epoch % t.eval_every != 0 and epoch != t.epochs:
+                    self.logger.log_losses(self.step, epoch, train_loss)
                     continue
-                metrics = self.validate(epoch)
+                val_loss, metrics = self.validate(epoch)
+                self.logger.log_losses(self.step, epoch, train_loss, val_loss)
                 self.save_checkpoint(self.out_dir / "last.pt", epoch, metrics)
                 if metrics["mIoU"] > best_miou:
                     best_miou = metrics["mIoU"]
@@ -177,10 +181,15 @@ class SegmentationTrainer:
         print(f"Best val mIoU {best_miou:.4f}, checkpoint: {best_path}")
         return best_path
 
-    def train_one_epoch(self, epoch: int) -> None:
-        """One pass over the training loader with one optimizer and scheduler step per batch."""
+    def train_one_epoch(self, epoch: int) -> float:
+        """One pass over the training loader with one optimizer and scheduler step per batch.
+
+        Returns the mean training loss of the epoch. It is measured on augmented crops while the weights still
+        change, so it is not directly comparable to the validation loss; the trend of the two curves is what counts.
+        """
         t, ignore = self.config.training, self.config.dataset.ignore_index
         self.model.train()
+        loss_sum, loss_count = 0.0, 0
         progress = tqdm(self.train_loader, desc=f"Epoch {epoch}/{t.epochs}", unit="batch")
         for batch in progress:
             image = batch["image"].to(self.device, non_blocking=True)
@@ -197,27 +206,34 @@ class SegmentationTrainer:
             self.optimizer.step()
             self.scheduler.step()
             self.step += 1
+            loss_sum, loss_count = loss_sum + loss.item(), loss_count + 1
 
             if self.step % t.log_every == 0:
-                lrs = {f"train/lr_{g['name']}": g["lr"] for g in self.optimizer.param_groups}
-                self.run.log({"train/loss": loss.item(), "epoch": epoch, **lrs}, step=self.step)
+                lrs = {g["name"]: g["lr"] for g in self.optimizer.param_groups}
+                self.logger.log_iteration(self.step, loss.item(), lrs)
                 progress.set_postfix(loss=f"{loss.item():.3f}")
+        return loss_sum / max(loss_count, 1)
 
-    def validate(self, epoch: int) -> Dict:
-        """Full-resolution validation (mIoU, pixel and class accuracy, per-class IoU), logged to W&B."""
+    def validate(self, epoch: int) -> tuple[float | None, Dict]:
+        """Full-resolution validation: returns (validation loss, metrics) and logs metrics and sample images.
+
+        The validation loss uses the same criterion as training. Sample images are always the first
+        `logging.num_sample_images` images of the fixed validation subset, so epochs can be compared visually.
+        """
         c, d = self.config, self.config.dataset
-        confusion = evaluate(self.model, self.val_loader, d.num_classes, d.ignore_index, self.device, c.training.amp)
+        confusion, val_loss = evaluate(self.model, self.val_loader, d.num_classes, d.ignore_index, self.device,
+                                       c.training.amp, criterion=self.criterion)
         metrics = confusion.compute(self.val_base.class_names)
+        self.logger.log_metrics(self.step, epoch, metrics)
 
-        log = {"val/mIoU": metrics["mIoU"], "val/pixel_accuracy": metrics["pixel_accuracy"],
-               "val/mean_class_accuracy": metrics["mean_class_accuracy"], "epoch": epoch}
-        log.update({f"val_iou/{name}": iou for name, iou in metrics["per_class_iou"].items()})
         if c.logging.num_sample_images > 0:
-            log["val/samples"] = sample_images(self.model, self.val_set, self.val_base, c.logging.num_sample_images,
-                                               d.ignore_index, self.device)
-        self.run.log(log, step=self.step)
-        print(f"Epoch {epoch}: val mIoU {metrics['mIoU']:.4f}, pixel accuracy {metrics['pixel_accuracy']:.4f}")
-        return metrics
+            images = sample_images(self.model, self.val_set, self.val_base, c.logging.num_sample_images,
+                                   d.ignore_index, self.device)
+            self.logger.log_samples(self.step, epoch, images)
+
+        print(f"Epoch {epoch}: val loss {val_loss:.4f}, mIoU {metrics['mIoU']:.4f}, "
+              f"pixel accuracy {metrics['pixel_accuracy']:.4f}")
+        return val_loss, metrics
 
     # ---- outputs ---------------------------------------------------------------------------------------------------
 

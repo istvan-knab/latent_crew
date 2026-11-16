@@ -44,7 +44,8 @@ def test(config: SegmentationConfig, checkpoint_path: str | Path, split: str = "
     ensure_dataset(d.name, d.root)
     dataset = SegmentationDataset.from_config(config, split, augment=False)
     loader = DataLoader(dataset, batch_size=1, num_workers=config.hardware.num_workers, pin_memory=device.type == "cuda")
-    metrics = evaluate(model, loader, d.num_classes, d.ignore_index, device, config.training.amp).compute(dataset.class_names)
+    confusion, _ = evaluate(model, loader, d.num_classes, d.ignore_index, device, config.training.amp)
+    metrics = confusion.compute(dataset.class_names)
 
     print(f"{split}: mIoU {metrics['mIoU']:.4f}, pixel accuracy {metrics['pixel_accuracy']:.4f}, "
           f"mean class accuracy {metrics['mean_class_accuracy']:.4f} ({len(dataset)} images)")
