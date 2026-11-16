@@ -37,12 +37,11 @@ Plan:
 ```
 data/       Dataset download, preparation and evaluation; data/README.md describes the data
 docs/       Documentation; docs/milestones/ holds one notebook per milestone
-docker/     Dockerfile, docker-compose.yml
-scripts/    entry-point shell scripts (train/test per task, full app)
-configs/    YAML config files
-src/        latent_crew Python package (data, models, training, evaluation, utils)
-app/        web app
-temp/       2D MNIST baseline classifier (TensorFlow, W&B) used to try out the training workflow
+docker/     Dockerfile, docker-compose.yml (+ docker-compose.gpu.yml for NVIDIA GPUs)
+scripts/    entry-point shell scripts (train, test, visualise)
+configs/    YAML config files (configs/segmentation.yaml)
+src/        latent_crew Python package (config, data, models, training, evaluation, utils)
+tests/      pytest suite (runs on synthetic data, CPU only)
 ```
 
 Main files:
@@ -58,7 +57,7 @@ Main files:
 | `data/reports/data_evaluation.md` | Result of the last data evaluation |
 | `pyproject.toml`, `uv.lock` | Python environment of the `latent_crew` package |
 | `docker/Dockerfile`, `docker/docker-compose.yml` | Reference Docker environment |
-| `configs/default.yaml`, `scripts/*.sh`, `src/latent_crew/` | Training and evaluation skeleton for the next milestones (not implemented yet) |
+| `configs/segmentation.yaml`, `scripts/*.sh`, `src/latent_crew/` | 2D semantic segmentation on SUN RGB-D: training, evaluation, visualisation |
 
 ## Software environment
 
@@ -83,9 +82,7 @@ jupyter notebook docs/milestones/milestone_1.ipynb
 
 The notebook shows the stored results of the data pipeline; the data description and options (train/val/test ratio, 3D boxes) are in [`data/README.md`](data/README.md). On Colab the first cell can run the pipeline (`RUN_PIPELINE = True`).
 
-### Later milestones (training, testing, app)
-
-The commands below belong to the next milestones; the training and evaluation code is not implemented yet.
+### Segmentation (training and testing)
 
 Every command can be run locally (with uv) or inside Docker. The same `latent-crew` Compose service runs every script.
 
@@ -121,7 +118,7 @@ If it prints `False`, a CUDA error or an unsupported-capability warning, install
 
 **2. Before the first training run:**
 
-- **Weights & Biases:** copy `.env.example` to `.env` in the repository root and fill in `WANDB_API_KEY` (`.env` is gitignored, never commit it). Docker Compose passes it into the container (`env_file`), and the train/test/HPO scripts load it for local runs too. Without it, the container asks for the key interactively and forgets it when it is removed. Without W&B: `logging.mode: disabled` (or `offline`, sync later with `wandb sync`).
+- **Weights & Biases:** copy `.env.example` to `.env` in the repository root and fill in `WANDB_API_KEY` (`.env` is gitignored, never commit it). Docker Compose passes it into the container (`env_file`), and the train/test scripts load it for local runs too. Without it, the container asks for the key interactively and forgets it when it is removed. Without W&B: `logging.mode: disabled` (or `offline`, sync later with `wandb sync`).
 - **Data:** the first run downloads SUN RGB-D (~7 GB) and prepares it (~11 min); at least 40 GB of free disk space is needed (the collector checks it). Later runs reuse `data/processed/` and download nothing.
 - **Working directory:** run every command from the repository root; `dataset.root` in the config is relative to it.
 - **Shared memory:** Compose gives the container `shm_size: 8gb`, because DataLoader workers pass batches through `/dev/shm` and Docker's 64 MB default fails with `unable to allocate shared memory(shm) ... No space left on device`. With plain `docker run`, add `--shm-size=8g`.
@@ -137,54 +134,13 @@ scripts/train_segmentation.sh configs/segmentation.yaml
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml run --rm latent-crew scripts/train_segmentation.sh configs/segmentation.yaml
 ```
 
-### Configuration
-
-Set the dataset, model and hyperparameters in a config file (see `configs/default.yaml`):
-
-```yaml
-dataset:
-  name: sunrgbd # or nyu_depth_v2
-  root: data/sunrgbd
-  num_classes: 37 # TODO: confirm per dataset
-
-model:
-  name: TODO # backbone/architecture not chosen yet
-  task: detection # or segmentation
-
-training:
-  batch_size: TODO
-  epochs: TODO
-  lr: TODO
-  optimizer: TODO
-  weight_decay: TODO
-  seed: TODO
-
-hardware:
-  device: cuda # TODO: confirm GPU/CUDA version used
-  num_workers: TODO
-```
-
-To reproduce results on both datasets, repeat training/evaluation with `dataset.name` set to `sunrgbd` and `nyu_depth_v2`.
-
-### Train detection
-
-The training scripts check whether the datasets are present in `data/` and download them if they are missing (TODO: download not implemented yet). Checkpoints are written to `checkpoints/`.
-
-```bash
-scripts/train_detection.sh configs/default.yaml
-```
-
-```bash
-docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/train_detection.sh configs/default.yaml
-```
-
 ### Train segmentation
 
-Segmentation uses its own config, `configs/segmentation.yaml`: task label (`experiment.task: 2d_segmentation`), dataset, encoder, decoder, input modalities (RGB or RGB-D), hyperparameters and W&B logging. Options and best practices: [docs/segmentation_models.md](docs/segmentation_models.md).
+Segmentation uses its own config, `configs/segmentation.yaml`: dataset, encoder, decoder, input modalities (RGB or RGB-D), hyperparameters and W&B logging. Options and best practices: [docs/segmentation_models.md](docs/segmentation_models.md).
 
-At start the script checks `data/processed/<dataset>/index.jsonl` and the files it lists. If everything is there, it is used as is; only if something is missing does it run `data/scripts/collect_data.py` for that dataset (download, verify, extract, prepare; resumable, needs ~40 GB free space). Only `sunrgbd` can be trained for now (NYU needs the NYU40 class mapping).
+At start the script checks `data/processed/<dataset>/index.jsonl` and the files it lists. If everything is there, it is used as is; only if something is missing does it run `data/scripts/collect_data.py` for that dataset (download, verify, extract, prepare; resumable, needs ~40 GB free space). Only `sunrgbd` is supported.
 
-Put your Weights & Biases key in `.env` (`cp .env.example .env`, then fill in `WANDB_API_KEY`), or log in once locally with `uv run wandb login`; set `logging.mode: disabled` to train without W&B. Every run is tagged with its task label.
+Put your Weights & Biases key in `.env` (`cp .env.example .env`, then fill in `WANDB_API_KEY`), or log in once locally with `uv run wandb login`; set `logging.mode: disabled` to train without W&B.
 
 ```bash
 scripts/train_segmentation.sh configs/segmentation.yaml
@@ -200,47 +156,15 @@ After successful training, the run logs a W&B artifact of type `model`, named `s
 
 Docker keeps W&B artifact staging and its cache under the mounted `outputs/` directory, so they survive container removal. Sync offline Docker runs from the same Compose environment so their stored file paths resolve.
 
-#### Hyperparameter optimisation
-
-`configs/hpo_segmentation.yaml` holds the search space (with priors), the fidelity (training epochs per trial) and the total budget in epochs; everything else comes from the base config. Two algorithms are available through [NePS](https://github.com/automl/neps), chosen with `--optimizer`:
-
-- `ifbo` (default): In-Context Freeze-Thaw BO, Rakotoarison et al., ICML 2024. Trains the configurations one epoch at a time and uses a pretrained learning-curve model to decide which one to continue. The surrogate (~55 MB) is downloaded on first use into `outputs/hpo/ifbo_surrogate/`.
-- `priorband`: PriorBand, Mallik et al., NeurIPS 2023. Hyperband that samples around the priors (the base config) and the best configuration found so far.
-
-```bash
-scripts/hpo_segmentation.sh configs/segmentation.yaml configs/hpo_segmentation.yaml
-```
-
-```bash
-scripts/hpo_segmentation.sh configs/segmentation.yaml configs/hpo_segmentation.yaml --optimizer priorband
-```
-
-Results go to `outputs/hpo/<study_name>/<optimizer>/`: one directory per trial step (config, report, and `state.pt` for the newest step of each configuration), NePS summaries in `summary/`, and `best_config.yaml`, which you can train directly with `scripts/train_segmentation.sh`. Running the same command again continues the study. In W&B:
-
-- **Configuration runs:** one run per configuration, resumed at every step, grouped as `<study_name>-<optimizer>` and tagged `hpo`. Like plain training, every validation logs `logging.num_sample_images` sample predictions (set it to 0 to save space during long studies). With `logging.mode: online` they also join a W&B sweep of the same name, so the **Sweeps** page shows parallel coordinates and parameter importance. The sweep is display only: NePS picks the configurations, and W&B's own search never runs.
-- **Study run:** `<study_name>-<optimizer>-study` (job type `hpo_study`) shows how the search went. It plots the best val mIoU over the spent epochs, which is the curve to compare optimizers by, and logs each step's decision (new configuration or continuation). It also has the learning curves of all configurations and the `study/trials` table, with one row per step and its hyperparameters. `best_config.yaml` is attached as an artifact at the end.
-
-Details: [docs/segmentation_models.md](docs/segmentation_models.md#hyperparameter-optimisation).
-
 Show one sample as the model sees it (RGB, depth, label mask, overlay; `--augment` applies the training augmentation):
 
 ```bash
 scripts/visualize_segmentation.sh configs/segmentation.yaml --index 0
 ```
 
-### Test detection
-
-```bash
-scripts/test_detection.sh configs/default.yaml checkpoints/detection.pt
-```
-
-```bash
-docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/test_detection.sh configs/default.yaml checkpoints/detection.pt
-```
-
 ### Test segmentation
 
-Evaluates on the test split (mIoU, per-class IoU, pixel accuracy), prints the table, writes `<checkpoint>_test_metrics.json` and logs a W&B run tagged `2d_segmentation` and `evaluation`. The network is rebuilt from the model spec saved in the checkpoint.
+Evaluates on the test split (mIoU, per-class IoU, pixel accuracy), prints the table, writes `<checkpoint>_test_metrics.json` and logs a W&B run tagged `evaluation`. The network is rebuilt from the model spec saved in the checkpoint.
 
 ```bash
 scripts/test_segmentation.sh configs/segmentation.yaml checkpoints/sunrgbd_rgbd_resnet50_deeplabv3plus/best.pt
@@ -251,13 +175,3 @@ docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/test_se
 ```
 
 Tests: `uv run pytest -q` (includes an end-to-end training run on synthetic data, CPU, W&B off).
-
-### Run the app (detection + segmentation end-to-end)
-
-```bash
-scripts/run_app.sh configs/default.yaml checkpoints/detection.pt checkpoints/segmentation.pt
-```
-
-```bash
-docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/run_app.sh configs/default.yaml checkpoints/detection.pt checkpoints/segmentation.pt
-```

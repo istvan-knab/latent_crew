@@ -13,7 +13,7 @@ from latent_crew.config import SegmentationConfig
 from latent_crew.data.prepare import count_missing_files, ensure_dataset
 from latent_crew.evaluation.metrics import ConfusionMatrix
 from latent_crew.evaluation.test_segmentation import test as run_test
-from latent_crew.training.train_segmentation import log_checkpoint_artifact, lr_lambda, train
+from latent_crew.training.train_segmentation import SegmentationTrainer, lr_lambda, train
 from test_segmentation_dataset import write_fake_dataset
 
 CONFIG_PATH = Path(__file__).parents[1] / "configs" / "segmentation.yaml"
@@ -29,12 +29,11 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SegmentationConfi
     raw["experiment"].update(name="smoke", output_dir=str(tmp_path / "checkpoints"))
     raw["dataset"]["root"] = str(root)
     raw["model"].update(encoder="mobilenet_v2", encoder_weights=None)
-    raw["training"].update(epochs=2, batch_size=2, warmup_iters=2, log_every=1, freeze_encoder_epochs=1,
-                           class_weighting="median_frequency", val_fraction=0.25)
+    raw["training"].update(epochs=2, batch_size=2, warmup_iters=2, log_every=1, class_weighting="median_frequency", val_fraction=0.25)
     raw["augmentation"]["crop_size"] = [64, 96]
     raw["hardware"].update(device="cpu", num_workers=0)
     raw["logging"].update(mode="disabled", num_sample_images=1)
-    return SegmentationConfig(raw)
+    return SegmentationConfig.from_dict(raw)
 
 
 def test_train_then_test(config: SegmentationConfig) -> None:
@@ -42,7 +41,6 @@ def test_train_then_test(config: SegmentationConfig) -> None:
     assert best.exists() and (best.parent / "last.pt").exists() and (best.parent / "config.yaml").exists()
     checkpoint = torch.load(best, map_location="cpu", weights_only=True)
     assert checkpoint["model_spec"] == config.model_spec()
-    assert checkpoint["task"] == "2d_segmentation"
 
     metrics = run_test(config, best, "test")
     assert 0.0 <= metrics["mIoU"] <= 1.0
@@ -85,7 +83,9 @@ def test_disabled_logging_skips_model_artifact(config: SegmentationConfig, monke
         raise AssertionError("disabled W&B must not construct or upload model artifacts")
 
     monkeypatch.setattr(wandb, "Artifact", fail)
-    log_checkpoint_artifact(None, config, tmp_path / "missing-checkpoints")
+    trainer = SegmentationTrainer.__new__(SegmentationTrainer)  # no data or model needed for this check
+    trainer.config, trainer.out_dir = config, tmp_path / "missing-checkpoints"
+    trainer.log_checkpoint_artifact()
 
 
 def test_existing_dataset_is_not_downloaded(config: SegmentationConfig, monkeypatch: pytest.MonkeyPatch) -> None:

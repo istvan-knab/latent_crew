@@ -42,12 +42,6 @@ def build_segmentation_model(spec: Dict[str, Any], pretrained: bool = True) -> n
         ) from error
 
 
-def set_encoder_trainable(model: nn.Module, trainable: bool) -> None:
-    """Freezes or unfreezes the encoder (used for the optional frozen-encoder warmup)."""
-    for param in model.encoder.parameters():
-        param.requires_grad = trainable
-
-
 def param_groups(model: nn.Module, lr: float, encoder_lr_mult: float) -> List[Dict[str, Any]]:
     """Pretrained encoder gets lr * encoder_lr_mult, the randomly initialised decoder and head get lr."""
     encoder_params = list(model.encoder.parameters())

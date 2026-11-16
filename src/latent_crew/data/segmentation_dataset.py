@@ -17,10 +17,11 @@ RGB_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 RGB_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 # Filled depth over valid pixels, mm (data/reports/data_evaluation.md)
-DEPTH_STATS_MM = {"sunrgbd": (2398.3, 1248.9), "nyu_depth_v2": (2796.3, 1386.1)}
+DEPTH_STATS_MM = {"sunrgbd": (2398.3, 1248.9)}
 
 
 def build_transform(config: SegmentationConfig, augment: bool) -> TrainTransform | EvalTransform:
+    """Random training augmentation, or padding-only evaluation transform when `augment` is False."""
     d, a = config.dataset, config.augmentation
     depth_mean, _ = DEPTH_STATS_MM[d.name]
     if not augment:
@@ -52,9 +53,6 @@ class SegmentationDataset(Dataset):
         ignore_index: int,
         transform: Callable[[Dict[str, np.ndarray]], Dict[str, np.ndarray]] | None = None,
     ):
-        if dataset == "nyu_depth_v2":
-            # processed/ stores the 894 original NYU labels; training needs NYU40
-            raise NotImplementedError("NYU needs the 894 -> 40 class mapping, which is not in processed/ yet")
         self.root = Path(root)
         self.modalities = modalities
         self.num_classes = num_classes
@@ -123,6 +121,7 @@ class SegmentationDataset(Dataset):
         return out
 
     def _read(self, relative_path: str) -> np.ndarray:
+        """Reads an image relative to the dataset root, keeping its dtype (uint16 depth stays uint16)."""
         path = self.root / relative_path
         # IMREAD_UNCHANGED keeps the uint16 depth and label PNGs as they are
         array = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
@@ -131,6 +130,7 @@ class SegmentationDataset(Dataset):
         return array
 
     def _remap_labels(self, semantic: np.ndarray) -> np.ndarray:
+        """0 (unlabeled) -> ignore_index, class k -> k - 1, so the network outputs exactly num_classes logits."""
         labels = semantic.astype(np.int64)
         if labels.max() > self.num_classes:
             raise ValueError(f"Label {labels.max()} exceeds num_classes={self.num_classes}")

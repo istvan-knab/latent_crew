@@ -95,11 +95,6 @@ def test_train_transform_keeps_depth_and_mask_aligned() -> None:
         assert np.array_equal(out["depth"][valid], out["mask"][valid] * 100 + 1000)
 
 
-def test_nyu_without_class_mapping_fails(root: Path) -> None:
-    with pytest.raises(NotImplementedError):
-        SegmentationDataset(root, "train", "nyu_depth_v2", ["rgb"], 40, IGNORE)
-
-
 def test_batch_runs_through_model(root: Path) -> None:
     transform = TrainTransform([64, 96], [0.5, 2.0], True, 0.2, IGNORE, 2398.3)
     loader = DataLoader(make_dataset(root, "train", ["rgb", "depth"], transform), batch_size=2, shuffle=True)
@@ -116,7 +111,7 @@ def test_from_config(root: Path) -> None:
     raw = yaml.safe_load((Path(__file__).parents[1] / "configs" / "segmentation.yaml").read_text(encoding="utf-8"))
     raw["dataset"]["root"] = str(root)
     raw["augmentation"]["crop_size"] = [64, 96]
-    config = SegmentationConfig(raw)
+    config = SegmentationConfig.from_dict(raw)
     assert SegmentationDataset.from_config(config, "train")[0]["image"].shape == (4, 64, 96)
     assert SegmentationDataset.from_config(config, "test")[0]["image"].shape == (4, 96, 160)
 

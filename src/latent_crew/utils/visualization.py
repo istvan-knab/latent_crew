@@ -91,6 +91,7 @@ def render_sample(
 
 
 def parse_args() -> argparse.Namespace:
+    """Command-line arguments: which sample to show and where to save it."""
     parser = argparse.ArgumentParser(description="Shows one segmentation sample: RGB, depth, mask, overlay.")
     parser.add_argument("--config", required=True, help="Path to the YAML config file")
     parser.add_argument("--split", default="train", choices=("train", "test"))
@@ -103,6 +104,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Command-line entry point: renders one sample and saves it as PNG."""
     args = parse_args()
     config = SegmentationConfig.load_from_yaml(args.config)
     dataset = SegmentationDataset.from_config(config, args.split, augment=args.augment)

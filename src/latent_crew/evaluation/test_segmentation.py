@@ -18,6 +18,7 @@ from latent_crew.utils.runtime import init_wandb, resolve_device, seed_everythin
 
 
 def parse_args() -> argparse.Namespace:
+    """Command-line arguments: config, checkpoint and split."""
     parser = argparse.ArgumentParser(description="Evaluates a trained segmentation checkpoint.")
     parser.add_argument("--config", required=True, help="Path to the YAML config file (dataset, hardware, logging)")
     parser.add_argument("--checkpoint", required=True, help="Path to the trained checkpoint")
@@ -69,6 +70,7 @@ def test(config: SegmentationConfig, checkpoint_path: str | Path, split: str = "
 
 
 def main() -> None:
+    """Command-line entry point."""
     args = parse_args()
     test(SegmentationConfig.load_from_yaml(args.config), args.checkpoint, args.split)
 
