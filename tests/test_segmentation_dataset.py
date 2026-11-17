@@ -139,3 +139,15 @@ def test_render_sample_writes_png(root: Path, tmp_path: Path) -> None:
     assert len(fig.axes) == 4 + 1  # four panels + depth colorbar
     fig.savefig(tmp_path / "sample.png")
     assert (tmp_path / "sample.png").stat().st_size > 0
+
+
+def test_render_sample_with_prediction_has_both_overlays(root: Path) -> None:
+    from latent_crew.utils.visualization import render_sample
+
+    dataset = make_dataset(root, "train", ["rgb", "depth"])
+    sample = dataset[0]
+    mask = sample["mask"].numpy()
+    fig = render_sample(dataset.denormalize(sample["image"]), mask, dataset.class_names, IGNORE, "test",
+                        prediction=np.zeros_like(mask))
+    titles = [ax.get_title() for ax in fig.axes]
+    assert "Ground-truth overlay" in titles and "Prediction overlay" in titles

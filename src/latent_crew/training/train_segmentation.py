@@ -71,6 +71,27 @@ def lr_lambda(scheduler: str, warmup_iters: int, total_iters: int) -> Callable[[
     return factor
 
 
+class EarlyStopping:
+    """Stops training when val mIoU has not improved for `patience` validations in a row (0 = never stop).
+
+    The LR schedule still spans `training.epochs`, so a stopped run ends before the LR has fully decayed;
+    `best.pt` is unaffected, it always holds the best validated epoch.
+    """
+
+    def __init__(self, patience: int):
+        self.patience = patience
+        self.best = float("-inf")
+        self.bad_validations = 0
+
+    def should_stop(self, miou: float) -> bool:
+        """Registers one validation result; True once the patience is used up."""
+        if miou > self.best:
+            self.best, self.bad_validations = miou, 0
+        else:
+            self.bad_validations += 1
+        return self.patience > 0 and self.bad_validations >= self.patience
+
+
 # --------------------------------------------------------------------------------------------------------------------
 # Trainer
 # --------------------------------------------------------------------------------------------------------------------
@@ -153,6 +174,7 @@ class SegmentationTrainer:
               f"{c.in_channels} input channels, device {self.device}")
 
         best_miou, best_path = -1.0, self.out_dir / "best.pt"
+        stopper = EarlyStopping(t.early_stopping_patience)
         try:
             for epoch in range(1, t.epochs + 1):
                 train_loss = self.train_one_epoch(epoch)
@@ -166,6 +188,11 @@ class SegmentationTrainer:
                     best_miou = metrics["mIoU"]
                     self.save_checkpoint(best_path, epoch, metrics)
                     self.run.summary["best_val_mIoU"], self.run.summary["best_epoch"] = best_miou, epoch
+                self.run.summary["last_epoch"] = epoch
+                if stopper.should_stop(metrics["mIoU"]):
+                    print(f"Early stopping at epoch {epoch}: val mIoU did not improve for {stopper.patience} validations")
+                    self.run.summary["early_stopped_epoch"] = epoch
+                    break
             self.log_checkpoint_artifact()
         finally:
             self.run.finish()
@@ -216,7 +243,8 @@ class SegmentationTrainer:
         confusion, val_loss = evaluate(self.model, self.val_loader, d.num_classes, d.ignore_index, self.device,
                                        c.training.amp, criterion=self.criterion)
         metrics = confusion.compute(self.val_set.class_names)
-        self.logger.log_metrics(self.step, epoch, metrics)
+        lrs = {g["name"]: g["lr"] for g in self.optimizer.param_groups}
+        self.logger.log_metrics(self.step, epoch, metrics, lrs)
 
         if c.logging.num_sample_images > 0:
             images = sample_images(self.model, self.val_set, self.val_set, c.logging.num_sample_images,
@@ -262,7 +290,7 @@ class SegmentationTrainer:
                 "model_spec": c.model_spec(),
                 "best_epoch": self.run.summary["best_epoch"],
                 "best_val_mIoU": self.run.summary["best_val_mIoU"],
-                "last_epoch": c.training.epochs,
+                "last_epoch": self.run.summary["last_epoch"],
             },
         )
         for filename in ("best.pt", "last.pt", "config.yaml"):

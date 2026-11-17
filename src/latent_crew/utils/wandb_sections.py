@@ -2,10 +2,12 @@
 
 W&B puts every key with the same prefix (the part before the first "/") into one panel section:
 
-    loss/      train and validation loss per epoch, in one place to spot over- and underfitting
+    loss/      train and validation loss per epoch, also together on one chart (loss/train_vs_val)
+               to spot over- and underfitting
     metrics/   semantic segmentation metrics on the validation set: mIoU, pixel accuracy,
-               mean class accuracy and a per-class IoU bar chart
-    samples/   the same validation images every epoch: RGB, depth, ground truth, prediction, overlay
+               mean class accuracy, a per-class IoU bar chart, and the learning rate at the end of the epoch
+    samples/   the same validation images every epoch: RGB, depth, ground truth, prediction, and the
+               ground-truth and prediction overlays on the RGB image
     optim/     per-iteration training loss and learning rates (for debugging the schedule)
 
 The epoch-level sections use `epoch` as their x-axis, the `optim/` section the global iteration.
@@ -21,6 +23,7 @@ class WandbSections:
 
     def __init__(self, run: "wandb.Run"):
         self.run = run
+        self.loss_history = {"epoch": [], "train": [], "val": []}  # validated epochs, for the combined loss chart
         # Epoch-level charts are plotted against the epoch, not against the iteration counter
         run.define_metric("epoch")
         for section in ("loss", "metrics", "samples"):
@@ -38,12 +41,18 @@ class WandbSections:
         log = {"epoch": epoch, "loss/train": train_loss}
         if val_loss is not None:
             log["loss/val"] = val_loss
+            for key, value in (("epoch", epoch), ("train", train_loss), ("val", val_loss)):
+                self.loss_history[key].append(value)
+            log["loss/train_vs_val"] = wandb.plot.line_series(
+                xs=self.loss_history["epoch"], ys=[self.loss_history["train"], self.loss_history["val"]],
+                keys=["train", "val"], title="Train vs validation loss", xname="epoch")
         self.run.log(log, step=step)
 
-    def log_metrics(self, step: int, epoch: int, metrics: Dict) -> None:
-        """metrics/ section: the standard semantic segmentation metrics on the validation set."""
+    def log_metrics(self, step: int, epoch: int, metrics: Dict, learning_rates: Dict[str, float]) -> None:
+        """metrics/ section: the standard semantic segmentation metrics on the validation set, plus the LR."""
         self.run.log({
             "epoch": epoch,
+            **{f"metrics/lr_{name}": lr for name, lr in learning_rates.items()},
             "metrics/mIoU": metrics["mIoU"],
             "metrics/pixel_accuracy": metrics["pixel_accuracy"],
             "metrics/mean_class_accuracy": metrics["mean_class_accuracy"],

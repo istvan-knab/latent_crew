@@ -155,10 +155,12 @@ The W&B dashboard of a training run has fixed sections (`src/latent_crew/utils/w
 
 | Section | Content |
 |---|---|
-| `loss/` | mean training loss per epoch and validation loss, on the same epoch axis |
-| `metrics/` | validation mIoU, pixel accuracy, mean class accuracy and a per-class IoU bar chart |
-| `samples/` | the same `logging.num_sample_images` validation images every epoch: RGB, depth, ground truth, prediction, overlay |
+| `loss/` | mean training loss per epoch and validation loss, and both together on one chart (`loss/train_vs_val`) |
+| `metrics/` | validation mIoU, pixel accuracy, mean class accuracy, per-class IoU bar chart, learning rate at the end of each epoch |
+| `samples/` | the same `logging.num_sample_images` validation images every epoch: RGB, depth, ground truth, prediction, ground-truth overlay, prediction overlay |
 | `optim/` | per-iteration training loss and learning rate per parameter group |
+
+Early stopping is off by default; `training.early_stopping_patience: N` stops after N validations without a val mIoU gain (the best checkpoint is kept either way).
 
 Checkpoints go to `checkpoints/<experiment.name>/` (`best.pt` by validation mIoU, `last.pt`, `config.yaml`). Validation uses the `val` split of `index.jsonl` (SUN RGB-D: 528 images, a fixed seeded 10 % of the official train set, set by `[split] val_ratio` in `data/config.toml`); training uses the remaining 4757 `train` images. The test split is only used by the test script.
 

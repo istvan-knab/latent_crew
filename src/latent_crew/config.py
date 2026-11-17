@@ -54,6 +54,7 @@ class TrainingConfig:
     amp: bool
     eval_every: int
     log_every: int
+    early_stopping_patience: int = 0  # validations without val mIoU gain before stopping; 0 = off
 
 
 @dataclass
@@ -164,6 +165,8 @@ class SegmentationConfig:
             raise ValueError("training.class_weighting must be none or median_frequency")
         if min(t.lr, t.batch_size, t.epochs, t.eval_every, t.log_every) <= 0:
             raise ValueError("training.lr, batch_size, epochs, eval_every and log_every must be positive")
+        if t.early_stopping_patience < 0:
+            raise ValueError("training.early_stopping_patience must be >= 0 (0 = off)")
         if not 0.0 <= t.encoder_lr_mult <= 1.0:
             raise ValueError("training.encoder_lr_mult must be in [0, 1]")
         if len(self.augmentation.crop_size) != 2 or any(s % 32 for s in self.augmentation.crop_size):

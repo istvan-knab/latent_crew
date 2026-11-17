@@ -164,7 +164,8 @@ def test_training_logs_the_three_sections(config: SegmentationConfig, monkeypatc
     monkeypatch.setattr(trainer_module, "WandbSections", RecordingSections)
     train(config)
     for key in ("loss/train", "loss/val", "metrics/mIoU", "metrics/pixel_accuracy", "metrics/mean_class_accuracy",
-                "metrics/per_class_iou", "samples/validation", "optim/train_loss_iter"):
+                "metrics/per_class_iou", "metrics/lr_decoder", "loss/train_vs_val", "samples/validation",
+                "optim/train_loss_iter"):
         assert key in logged, key
     assert logged["loss/val"] > 0 and logged["loss/train"] > 0
 
@@ -175,3 +176,18 @@ def test_trainer_uses_the_val_split_of_the_index(config: SegmentationConfig) -> 
     assert {s["split"] for s in trainer.train_set.samples} == {"train"}
     assert {s["split"] for s in trainer.val_set.samples} == {"val"}
     assert (len(trainer.train_set), len(trainer.val_set)) == (6, 2)
+
+
+def test_early_stopping_counts_validations_without_gain() -> None:
+    from latent_crew.training.train_segmentation import EarlyStopping
+
+    stopper = EarlyStopping(patience=2)
+    assert [stopper.should_stop(m) for m in (0.1, 0.2, 0.2, 0.15)] == [False, False, False, True]
+    assert not any(EarlyStopping(patience=0).should_stop(0.0) for _ in range(10))  # 0 = off
+
+
+def test_training_stops_early(config: SegmentationConfig) -> None:
+    config.training.epochs, config.training.early_stopping_patience = 5, 1
+    best = train(config)
+    last = torch.load(best.parent / "last.pt", map_location="cpu", weights_only=True)
+    assert last["epoch"] < 5  # random weights on random labels: mIoU stalls quickly

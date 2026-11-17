@@ -31,6 +31,7 @@ training:
   class_weighting: none # none | median_frequency
   amp: true # mixed precision (bfloat16 on CUDA)
   eval_every: 1 # validate every N epochs
+  early_stopping_patience: 0 # stop after N validations without val mIoU gain; 0 = off (train all epochs)
   log_every: 20 # log training loss and LR every N iterations
 
 augmentation: # geometric ops apply to rgb, depth and mask alike; color jitter to rgb only
