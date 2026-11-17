@@ -160,7 +160,7 @@ The W&B dashboard of a training run has fixed sections (`src/latent_crew/utils/w
 | `samples/` | the same `logging.num_sample_images` validation images every epoch: RGB, depth, ground truth, prediction, ground-truth overlay, prediction overlay |
 | `optim/` | per-iteration training loss and learning rate per parameter group |
 
-Early stopping is off by default; `training.early_stopping_patience: N` stops after N validations without a val mIoU gain (the best checkpoint is kept either way).
+Early stopping: `training.early_stopping_patience: 10` (in `configs/segmentation.yaml`) stops after 10 validations without a val mIoU gain; 0 turns it off. The best checkpoint is kept either way.
 
 Checkpoints go to `checkpoints/<experiment.name>/` (`best.pt` by validation mIoU, `last.pt`, `config.yaml`). Validation uses the `val` split of `index.jsonl` (SUN RGB-D: 528 images, a fixed seeded 10 % of the official train set, set by `[split] val_ratio` in `data/config.toml`); training uses the remaining 4757 `train` images. The test split is only used by the test script.
 
