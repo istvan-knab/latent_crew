@@ -5,14 +5,13 @@ Press q (or Esc) to quit.
 
 This is not a pytest test (the file name does not start with test_), so `pytest` never collects it.
 
-Run on macOS (Apple Silicon, macOS 15+), from the repository root. OpenCV and NumPy come from the project
-environment, the RealSense SDK is added only for this run (pyrealsense2-macosx ships arm64 wheels up to Python 3.14):
-    uv run --with pyrealsense2-macosx python tests/realsense_stream.py
-    uv run --with pyrealsense2-macosx python tests/realsense_stream.py --width 848 --height 480 --max-depth 4
+Run from the repository root (the RealSense SDK comes from the optional `camera` extra in pyproject.toml):
+    scripts/realsense_stream.sh
+    scripts/realsense_stream.sh --width 848 --height 480 --max-depth 4
+    scripts/realsense_stream.sh --sudo        # macOS: if the camera is not found or USB access is refused
 
-If the camera is not found or the USB access is refused, macOS needs root for the USB device:
-    uv pip install pyrealsense2-macosx            # into the project's .venv
-    sudo .venv/bin/python tests/realsense_stream.py
+Supported: macOS 15+ on Apple Silicon (pyrealsense2-macosx), Linux x86_64 and Windows (pyrealsense2), Python 3.14.
+Linux aarch64 (e.g. the DGX Spark) has no pyrealsense2 wheel; there librealsense must be built from source.
 
 The camera needs a USB 3 connection (USB-C port and a USB 3 capable cable, ideally no hub); over USB 2 the
 depth stream either fails to start or only runs at low resolution and frame rate.
@@ -28,7 +27,8 @@ import numpy as np
 try:
     import pyrealsense2 as rs
 except ImportError as error:  # pragma: no cover - only hit on machines without the SDK
-    raise SystemExit("pyrealsense2 is missing: pip install pyrealsense2-macosx (macOS) or pyrealsense2 (Linux)") from error
+    raise SystemExit("pyrealsense2 is missing: run scripts/realsense_stream.sh (uses the `camera` extra), "
+                     "or uv run --extra camera python tests/realsense_stream.py") from error
 
 WINDOW = "RealSense: RGB | depth (q to quit)"
 
