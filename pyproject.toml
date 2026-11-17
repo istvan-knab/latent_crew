@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Live Intel RealSense view (tests/realsense_stream.py): uv run --extra camera ... or scripts/realsense_stream.sh
+# Live Intel RealSense view (demo/realsense_stream.py): uv run --extra camera ... or demo/realsense_stream.sh
 # Not needed for training; Docker and plain `uv sync` leave it out.
 camera = [
     "pyrealsense2-macosx>=2.56.5; sys_platform == 'darwin' and platform_machine == 'arm64'",

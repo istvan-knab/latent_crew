@@ -1,14 +1,14 @@
-"""Manual hardware check: live RGB + depth stream from an Intel RealSense camera (e.g. the D435i).
+"""Demo: live RGB + depth stream from an Intel RealSense camera (e.g. the D435i).
 
 Shows the colour image and the colourised depth side by side in one OpenCV window, with the measured FPS.
 Press q (or Esc) to quit.
 
-This is not a pytest test (the file name does not start with test_), so `pytest` never collects it.
+Demo tool: it lives in demo/, outside the pytest suite.
 
 Run from the repository root (the RealSense SDK comes from the optional `camera` extra in pyproject.toml):
-    scripts/realsense_stream.sh
-    scripts/realsense_stream.sh --width 848 --height 480 --max-depth 4
-    scripts/realsense_stream.sh --sudo        # macOS: if the camera is not found or USB access is refused
+    demo/realsense_stream.sh
+    demo/realsense_stream.sh --width 848 --height 480 --max-depth 4
+    demo/realsense_stream.sh --sudo        # macOS: if the camera is not found or USB access is refused
 
 Supported: macOS 15+ on Apple Silicon (pyrealsense2-macosx), Linux x86_64 and Windows (pyrealsense2), Python 3.14.
 Linux aarch64 (e.g. the DGX Spark) has no pyrealsense2 wheel; there librealsense must be built from source.
@@ -27,8 +27,8 @@ import numpy as np
 try:
     import pyrealsense2 as rs
 except ImportError as error:  # pragma: no cover - only hit on machines without the SDK
-    raise SystemExit("pyrealsense2 is missing: run scripts/realsense_stream.sh (uses the `camera` extra), "
-                     "or uv run --extra camera python tests/realsense_stream.py") from error
+    raise SystemExit("pyrealsense2 is missing: run demo/realsense_stream.sh (uses the `camera` extra), "
+                     "or uv run --extra camera python demo/realsense_stream.py") from error
 
 WINDOW = "RealSense: RGB | depth (q to quit)"
 

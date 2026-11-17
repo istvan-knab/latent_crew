@@ -41,7 +41,8 @@ docker/     Dockerfile, docker-compose.yml (+ docker-compose.gpu.yml for NVIDIA 
 scripts/    entry-point shell scripts (train, test, visualise)
 configs/    YAML config files (configs/segmentation.yaml)
 src/        latent_crew Python package (config, data, models, training, evaluation, utils)
-tests/      pytest suite (runs on synthetic data, CPU only) and the manual RealSense viewer
+tests/      pytest suite (runs on synthetic data, CPU only)
+demo/       demo scripts (live RealSense view) and, later, the best models; see demo/README.md
 ```
 
 Main files:
@@ -185,16 +186,16 @@ docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/test_se
 
 Tests: `uv run pytest -q` (includes an end-to-end training run on synthetic data, CPU, W&B off).
 
-### Live RealSense camera view
+### Demo: live RealSense camera view
 
-`tests/realsense_stream.py` shows the RGB and the colourised depth stream of a plugged-in Intel RealSense camera (e.g. D435i) side by side, with FPS; `q` or Esc quits. It is a manual hardware check, not a pytest test, and runs locally with uv (no Docker):
+The `demo/` folder holds everything for the demo (see [`demo/README.md`](demo/README.md)). `demo/realsense_stream.py` shows the RGB and the colourised depth stream of a plugged-in Intel RealSense camera (e.g. D435i) side by side, with FPS; `q` or Esc quits. It runs locally with uv (no Docker):
 
 ```bash
-scripts/realsense_stream.sh
+demo/realsense_stream.sh
 ```
 
 - **SDK:** comes from the optional `camera` extra in `pyproject.toml` (`pyrealsense2-macosx` on macOS, `pyrealsense2` on Linux/Windows); plain `uv sync` and Docker leave it out.
 - **Supported:** macOS 15+ on Apple Silicon, Linux x86_64 and Windows, Python 3.14. Linux aarch64 (e.g. the DGX Spark) has no wheel; build librealsense from source there.
-- **macOS USB access:** if the camera is not found or access is refused, run `scripts/realsense_stream.sh --sudo`. It installs the environment as your user and only runs the viewer as root.
+- **macOS USB access:** if the camera is not found or access is refused, run `demo/realsense_stream.sh --sudo`. It installs the environment as your user and only runs the viewer as root.
 - **USB 3:** use a USB 3 capable USB-C port and cable, ideally without a hub; over USB 2 the depth stream fails to start or only runs at low resolution and frame rate.
 - Options: `--width`, `--height`, `--fps`, `--max-depth` (metres at the far end of the colour scale).
