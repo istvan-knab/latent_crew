@@ -159,7 +159,7 @@ The W&B dashboard of a training run has fixed sections (`src/latent_crew/utils/w
 | `samples/` | the same `logging.num_sample_images` validation images every epoch: RGB, depth, ground truth, prediction, overlay |
 | `optim/` | per-iteration training loss and learning rate per parameter group |
 
-Checkpoints go to `checkpoints/<experiment.name>/` (`best.pt` by validation mIoU, `last.pt`, `config.yaml`). Validation uses `training.val_fraction` of the official train split; the test split is only used by the test script.
+Checkpoints go to `checkpoints/<experiment.name>/` (`best.pt` by validation mIoU, `last.pt`, `config.yaml`). Validation uses the `val` split of `index.jsonl` (SUN RGB-D: 528 images, a fixed seeded 10 % of the official train set, set by `[split] val_ratio` in `data/config.toml`); training uses the remaining 4757 `train` images. The test split is only used by the test script.
 
 After successful training, the run logs a W&B artifact of type `model`, named `segmentation-<run_id>`, containing `best.pt`, `last.pt` and `config.yaml`. Find it in the run's **Artifacts** tab; its metadata includes the model specification, best validation mIoU and best epoch. Both checkpoints include the weights, model specification, class names and configuration needed to rebuild the network. With `logging.mode: online` the artifact is uploaded; `offline` stages it for later `wandb sync`, and `disabled` keeps only the local checkpoints. Existing checkpoints are not uploaded retroactively.
 

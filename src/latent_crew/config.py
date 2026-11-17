@@ -52,7 +52,6 @@ class TrainingConfig:
     encoder_lr_mult: float
     class_weighting: str
     amp: bool
-    val_fraction: float
     eval_every: int
     log_every: int
 
@@ -167,8 +166,6 @@ class SegmentationConfig:
             raise ValueError("training.lr, batch_size, epochs, eval_every and log_every must be positive")
         if not 0.0 <= t.encoder_lr_mult <= 1.0:
             raise ValueError("training.encoder_lr_mult must be in [0, 1]")
-        if not 0.0 < t.val_fraction < 0.5:
-            raise ValueError("training.val_fraction must be in (0, 0.5)")
         if len(self.augmentation.crop_size) != 2 or any(s % 32 for s in self.augmentation.crop_size):
             raise ValueError("augmentation.crop_size must be [height, width], both multiples of 32")
         if self.hardware.device not in ("cuda", "mps", "cpu"):

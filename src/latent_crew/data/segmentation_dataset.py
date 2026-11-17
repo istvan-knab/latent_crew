@@ -67,7 +67,8 @@ class SegmentationDataset(Dataset):
             rows = [json.loads(line) for line in f if line.strip()]
         self.samples = [r for r in rows if r["split"] == split]
         if not self.samples:
-            raise ValueError(f"No {split!r} samples in {index}")
+            hint = " (set [split] val_ratio in data/config.toml and run collect_data.py --resplit)" if split == "val" else ""
+            raise ValueError(f"No {split!r} samples in {index}{hint}")
         self.class_names = json.loads((self.root / "classes.json").read_text(encoding="utf-8"))[1:]
 
     @classmethod

@@ -1,8 +1,8 @@
 """Trains the 2D semantic segmentation model end to end and logs the run to Weights & Biases.
 
 The encoder starts from pretrained ImageNet weights, the decoder and the classifier head start random, and both are
-trained together. Validation runs on a fixed hold-out of the official train split; the official test split is only
-used by `latent_crew.evaluation.test_segmentation`.
+trained together. Model selection uses the `val` split of index.jsonl (a fixed, seeded part of the official train set
+written by data/scripts/collect_data.py); the official test split is only used by `latent_crew.evaluation.test_segmentation`.
 
 Usage:
     python -m latent_crew.training.train_segmentation --config configs/segmentation.yaml
@@ -11,13 +11,13 @@ Usage:
 import argparse
 import math
 from pathlib import Path
-from typing import Callable, Dict, List
+from typing import Callable, Dict, Iterable
 
 import numpy as np
 import torch
 import wandb
 from torch import nn
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from latent_crew.config import SegmentationConfig
@@ -34,14 +34,7 @@ from latent_crew.utils.wandb_sections import WandbSections
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def split_train_val(n: int, val_fraction: float, seed: int) -> tuple[List[int], List[int]]:
-    """Splits the indices 0..n-1 into (train, val) with a fixed random permutation."""
-    order = np.random.default_rng(seed).permutation(n).tolist()
-    n_val = max(1, round(n * val_fraction))
-    return order[n_val:], order[:n_val]
-
-
-def median_frequency_weights(dataset: SegmentationDataset, indices: List[int], num_classes: int,
+def median_frequency_weights(dataset: SegmentationDataset, indices: Iterable[int], num_classes: int,
                              ignore_index: int) -> torch.Tensor:
     """Class weights against imbalance: weight_c = median(freq) / freq_c (Eigen & Fergus, 2015).
 
@@ -103,17 +96,15 @@ class SegmentationTrainer:
     # ---- setup -----------------------------------------------------------------------------------------------------
 
     def _build_data(self) -> None:
-        """Datasets and loaders. The same train-split samples are read twice: augmented and plain."""
+        """Datasets and loaders: `train` split with augmentation, `val` split at full resolution."""
         c, d, t = self.config, self.config.dataset, self.config.training
         ensure_dataset(d.name, d.root)  # downloads and prepares the data only if something is missing
 
-        self.train_base = SegmentationDataset.from_config(c, "train", augment=True)
-        self.val_base = SegmentationDataset.from_config(c, "train", augment=False)
-        self.train_idx, val_idx = split_train_val(len(self.train_base), t.val_fraction, c.experiment.seed)
-        if len(self.train_idx) < t.batch_size:
-            raise ValueError(f"Only {len(self.train_idx)} training samples for batch_size={t.batch_size}")
-        self.train_set = Subset(self.train_base, self.train_idx)
-        self.val_set = Subset(self.val_base, val_idx)
+        # The split lives in index.jsonl, so every run (and every team member) uses the same validation images
+        self.train_set = SegmentationDataset.from_config(c, "train", augment=True)
+        self.val_set = SegmentationDataset.from_config(c, "val", augment=False)
+        if len(self.train_set) < t.batch_size:
+            raise ValueError(f"Only {len(self.train_set)} training samples for batch_size={t.batch_size}")
 
         workers = c.hardware.num_workers
         loader_args = {"num_workers": workers, "pin_memory": self.device.type == "cuda",
@@ -142,7 +133,8 @@ class SegmentationTrainer:
 
         class_weight = None
         if t.class_weighting == "median_frequency":
-            class_weight = median_frequency_weights(self.train_base, self.train_idx, d.num_classes, d.ignore_index)
+            class_weight = median_frequency_weights(self.train_set, range(len(self.train_set)), d.num_classes,
+                                                    d.ignore_index)
             class_weight = class_weight.to(self.device)
         self.criterion = nn.CrossEntropyLoss(weight=class_weight, ignore_index=d.ignore_index)
 
@@ -223,11 +215,11 @@ class SegmentationTrainer:
         c, d = self.config, self.config.dataset
         confusion, val_loss = evaluate(self.model, self.val_loader, d.num_classes, d.ignore_index, self.device,
                                        c.training.amp, criterion=self.criterion)
-        metrics = confusion.compute(self.val_base.class_names)
+        metrics = confusion.compute(self.val_set.class_names)
         self.logger.log_metrics(self.step, epoch, metrics)
 
         if c.logging.num_sample_images > 0:
-            images = sample_images(self.model, self.val_set, self.val_base, c.logging.num_sample_images,
+            images = sample_images(self.model, self.val_set, self.val_set, c.logging.num_sample_images,
                                    d.ignore_index, self.device)
             self.logger.log_samples(self.step, epoch, images)
 
@@ -245,7 +237,7 @@ class SegmentationTrainer:
                 "state_dict": self.model.state_dict(),
                 "epoch": epoch,
                 "val_metrics": metrics,
-                "class_names": self.val_base.class_names,
+                "class_names": self.val_set.class_names,
                 "config": self.config.to_dict(),
             },
             path,

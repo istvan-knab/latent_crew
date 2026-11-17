@@ -21,17 +21,21 @@ IGNORE = 255
 HEIGHT, WIDTH = 90, 130  # deliberately not multiples of 32, like the real sensors
 
 
-def write_fake_dataset(root: Path, n_train: int = 3, n_test: int = 2) -> None:
-    """Writes rgb JPEG, uint16 mm depth PNG and uint8 semantic PNG plus index.jsonl, like collect_data.py."""
+def write_fake_dataset(root: Path, n_train: int = 3, n_test: int = 2, n_val: int = 2) -> None:
+    """Writes rgb JPEG, uint16 mm depth PNG and uint8 semantic PNG plus index.jsonl, like collect_data.py.
+
+    As in the real index, `val` rows point to files in the train/ folder.
+    """
     rng = np.random.default_rng(0)
     rows = []
-    for i in range(n_train + n_test):
-        split = "train" if i < n_train else "test"
+    splits = ["train"] * n_train + ["test"] * n_test + ["val"] * n_val
+    for i, split in enumerate(splits):
+        folder = "train" if split == "val" else split
         stem = f"{i + 1:06d}"
         row = {"id": f"sun_{stem}", "dataset": "sunrgbd", "split": split}
         for field, ext in (("rgb", "jpg"), ("depth", "png"), ("semantic", "png")):
-            row[field] = f"{split}/{field}/{stem}.{ext}"
-            (root / split / field).mkdir(parents=True, exist_ok=True)
+            row[field] = f"{folder}/{field}/{stem}.{ext}"
+            (root / folder / field).mkdir(parents=True, exist_ok=True)
         semantic = rng.integers(0, NUM_CLASSES + 1, (HEIGHT, WIDTH), dtype=np.uint8)
         semantic[:10] = 0  # an unlabeled band
         depth = rng.integers(500, 8000, (HEIGHT, WIDTH)).astype(np.uint16)
@@ -58,6 +62,7 @@ def make_dataset(root: Path, split: str, modalities: list, transform=None) -> Se
 def test_split_filtering_and_class_names(root: Path) -> None:
     assert len(make_dataset(root, "train", ["rgb"])) == 3
     assert len(make_dataset(root, "test", ["rgb"])) == 2
+    assert len(make_dataset(root, "val", ["rgb"])) == 2
     assert len(make_dataset(root, "train", ["rgb"]).class_names) == NUM_CLASSES
 
 

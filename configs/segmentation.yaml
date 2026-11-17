@@ -30,7 +30,6 @@ training:
   encoder_lr_mult: 0.1 # encoder LR = lr * encoder_lr_mult (pretrained weights move slower)
   class_weighting: none # none | median_frequency
   amp: true # mixed precision (bfloat16 on CUDA)
-  val_fraction: 0.1 # held out from the train split for model selection; the test split is only used for the final evaluation
   eval_every: 1 # validate every N epochs
   log_every: 20 # log training loss and LR every N iterations
 

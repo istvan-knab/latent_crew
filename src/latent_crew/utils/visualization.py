@@ -94,7 +94,7 @@ def parse_args() -> argparse.Namespace:
     """Command-line arguments: which sample to show and where to save it."""
     parser = argparse.ArgumentParser(description="Shows one segmentation sample: RGB, depth, mask, overlay.")
     parser.add_argument("--config", required=True, help="Path to the YAML config file")
-    parser.add_argument("--split", default="train", choices=("train", "test"))
+    parser.add_argument("--split", default="train", choices=("train", "val", "test"))
     which = parser.add_mutually_exclusive_group()
     which.add_argument("--index", type=int, default=0, help="Position within the split")
     which.add_argument("--id", help="Sample id from index.jsonl, e.g. sun_000123")

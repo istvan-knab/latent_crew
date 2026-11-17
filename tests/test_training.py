@@ -23,13 +23,13 @@ CONFIG_PATH = Path(__file__).parents[1] / "configs" / "segmentation.yaml"
 def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SegmentationConfig:
     root = tmp_path / "data" / "processed" / "sunrgbd"
     root.mkdir(parents=True)
-    write_fake_dataset(root, n_train=8, n_test=2)
+    write_fake_dataset(root, n_train=6, n_test=2, n_val=2)
     monkeypatch.chdir(tmp_path)  # W&B files go to ./outputs
     raw = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
     raw["experiment"].update(name="smoke", output_dir=str(tmp_path / "checkpoints"))
     raw["dataset"]["root"] = str(root)
     raw["model"].update(encoder="mobilenet_v2", encoder_weights=None)
-    raw["training"].update(epochs=2, batch_size=2, warmup_iters=2, log_every=1, class_weighting="median_frequency", val_fraction=0.25)
+    raw["training"].update(epochs=2, batch_size=2, warmup_iters=2, log_every=1, class_weighting="median_frequency")
     raw["augmentation"]["crop_size"] = [64, 96]
     raw["hardware"].update(device="cpu", num_workers=0)
     raw["logging"].update(mode="disabled", num_sample_images=1)
@@ -167,3 +167,11 @@ def test_training_logs_the_three_sections(config: SegmentationConfig, monkeypatc
                 "metrics/per_class_iou", "samples/validation", "optim/train_loss_iter"):
         assert key in logged, key
     assert logged["loss/val"] > 0 and logged["loss/train"] > 0
+
+
+def test_trainer_uses_the_val_split_of_the_index(config: SegmentationConfig) -> None:
+    """Validation reads the `val` rows of index.jsonl; nothing is carved off the train split any more."""
+    trainer = SegmentationTrainer(config)
+    assert {s["split"] for s in trainer.train_set.samples} == {"train"}
+    assert {s["split"] for s in trainer.val_set.samples} == {"val"}
+    assert (len(trainer.train_set), len(trainer.val_set)) == (6, 2)
