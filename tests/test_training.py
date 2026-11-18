@@ -191,3 +191,8 @@ def test_training_stops_early(config: SegmentationConfig) -> None:
     best = train(config)
     last = torch.load(best.parent / "last.pt", map_location="cpu", weights_only=True)
     assert last["epoch"] < 5  # random weights on random labels: mIoU stalls quickly
+
+
+def test_training_with_dice_ce_loss(config: SegmentationConfig) -> None:
+    config.training.epochs, config.training.loss = 1, "dice_ce"
+    assert train(config).exists()

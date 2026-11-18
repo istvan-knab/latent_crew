@@ -7,6 +7,26 @@ from typing import Any, Dict, List
 import yaml
 
 
+def read_yaml(path: str | Path) -> Dict[str, Any]:
+    """Reads a config; a top-level `base: other.yaml` (relative to this file) is loaded first and overridden.
+
+    Experiment configs therefore only list what they change, e.g. configs/experiments/dice_ce.yaml.
+    """
+    path = Path(path)
+    with open(path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    base = raw.pop("base", None)
+    return merge(read_yaml(path.parent / base), raw) if base else raw
+
+
+def merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursive dict merge: values of `override` win, nested sections are merged key by key."""
+    out = dict(base)
+    for key, value in override.items():
+        out[key] = merge(out[key], value) if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+    return out
+
+
 @dataclass
 class ExperimentConfig:
     """Run name, random seed and where checkpoints go (`experiment:` in the YAML)."""
@@ -55,6 +75,7 @@ class TrainingConfig:
     eval_every: int
     log_every: int
     early_stopping_patience: int = 0  # validations without val mIoU gain before stopping; 0 = off
+    loss: str = "ce"  # ce | dice_ce
 
 
 @dataclass
@@ -116,9 +137,8 @@ class SegmentationConfig:
 
     @classmethod
     def load_from_yaml(cls, path: str | Path) -> "SegmentationConfig":
-        """Reads and validates a YAML config file."""
-        with open(path, "r", encoding="utf-8") as f:
-            return cls.from_dict(yaml.safe_load(f))
+        """Reads and validates a YAML config file (resolving `base:` inheritance, see `read_yaml`)."""
+        return cls.from_dict(read_yaml(path))
 
     def to_dict(self) -> Dict[str, Any]:
         """Plain nested dict, same layout as the YAML file (logged to W&B and stored in checkpoints)."""
@@ -161,6 +181,8 @@ class SegmentationConfig:
             raise ValueError("training.optimizer must be sgd or adamw")
         if t.scheduler not in ("poly", "cosine"):
             raise ValueError("training.scheduler must be poly or cosine")
+        if t.loss not in ("ce", "dice_ce"):
+            raise ValueError("training.loss must be ce or dice_ce")
         if t.class_weighting not in ("none", "median_frequency"):
             raise ValueError("training.class_weighting must be none or median_frequency")
         if min(t.lr, t.batch_size, t.epochs, t.eval_every, t.log_every) <= 0:

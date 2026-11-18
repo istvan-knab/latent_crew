@@ -25,6 +25,7 @@ from latent_crew.data.prepare import ensure_dataset
 from latent_crew.data.segmentation_dataset import SegmentationDataset
 from latent_crew.evaluation.evaluate import evaluate, sample_images
 from latent_crew.models.segmentation import build_segmentation_model, param_groups
+from latent_crew.training.losses import build_criterion
 from latent_crew.utils.runtime import autocast, init_wandb, resolve_device, seed_everything
 from latent_crew.utils.wandb_sections import WandbSections
 
@@ -157,7 +158,7 @@ class SegmentationTrainer:
             class_weight = median_frequency_weights(self.train_set, range(len(self.train_set)), d.num_classes,
                                                     d.ignore_index)
             class_weight = class_weight.to(self.device)
-        self.criterion = nn.CrossEntropyLoss(weight=class_weight, ignore_index=d.ignore_index)
+        self.criterion = build_criterion(t.loss, d.ignore_index, class_weight)
 
     # ---- main loop -------------------------------------------------------------------------------------------------
 

@@ -1,0 +1,9 @@
+# Experiment: stronger augmentation than the baseline (wider scale range, stronger colour jitter on RGB).
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_strongaug
+augmentation:
+  scale_range: [0.5, 2.5]
+  color_jitter: 0.4
+logging:
+  tags: [strong_aug]

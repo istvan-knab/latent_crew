@@ -162,6 +162,15 @@ The W&B dashboard of a training run has fixed sections (`src/latent_crew/utils/w
 
 Early stopping: `training.early_stopping_patience: 10` (in `configs/segmentation.yaml`) stops after 10 validations without a val mIoU gain; 0 turns it off. The best checkpoint is kept either way.
 
+**Experiments.** `configs/experiments/*.yaml` change one thing each against the baseline `configs/segmentation.yaml` (they inherit it with `base:` and only list the change); each gets its own `experiment.name`, so checkpoints and W&B runs stay separate:
+
+| Config | Change |
+|---|---|
+| `configs/segmentation.yaml` | baseline: CE loss, AMP (bf16) on, scale 0.5–2.0, colour jitter 0.2 |
+| `configs/experiments/class_weighting.yaml` | median-frequency class weights in the CE loss |
+| `configs/experiments/dice_ce.yaml` | `training.loss: dice_ce` (cross-entropy + soft Dice) |
+| `configs/experiments/strong_aug.yaml` | scale 0.5–2.5, colour jitter 0.4 |
+
 Checkpoints go to `checkpoints/<experiment.name>/` (`best.pt` by validation mIoU, `last.pt`, `config.yaml`). Validation uses the `val` split of `index.jsonl` (SUN RGB-D: 528 images, a fixed seeded 10 % of the official train set, set by `[split] val_ratio` in `data/config.toml`); training uses the remaining 4757 `train` images. The test split is only used by the test script.
 
 After successful training, the run logs a W&B artifact of type `model`, named `segmentation-<run_id>`, containing `best.pt`, `last.pt` and `config.yaml`. Find it in the run's **Artifacts** tab; its metadata includes the model specification, best validation mIoU and best epoch. Both checkpoints include the weights, model specification, class names and configuration needed to rebuild the network. With `logging.mode: online` the artifact is uploaded; `offline` stages it for later `wandb sync`, and `disabled` keeps only the local checkpoints. Existing checkpoints are not uploaded retroactively.

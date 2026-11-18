@@ -77,3 +77,25 @@ def test_param_groups() -> None:
     groups = param_groups(model, lr=0.01, encoder_lr_mult=0.1)
     assert [g["lr"] for g in groups] == pytest.approx([0.001, 0.01])
     assert sum(len(g["params"]) for g in groups) == len(list(model.parameters()))
+
+
+@pytest.mark.parametrize("path", sorted((CONFIG_PATH.parent / "experiments").glob("*.yaml")), ids=lambda p: p.stem)
+def test_experiment_configs_only_change_what_they_list(path: Path) -> None:
+    from latent_crew.config import read_yaml
+
+    base, experiment = load_raw(), read_yaml(path)
+    assert experiment["experiment"]["name"] != base["experiment"]["name"]  # separate checkpoint folder
+    changed = {(s, k) for s in base for k in base[s] if experiment[s][k] != base[s][k]}
+    assert ("experiment", "name") in changed and len(changed) <= 4  # name, tags and at most two settings
+    SegmentationConfig.load_from_yaml(path)  # valid as a whole
+
+
+def test_dice_ce_loss() -> None:
+    from latent_crew.training.losses import DiceCELoss, build_criterion
+
+    target = torch.tensor([[[0, 1], [1, 255]]])
+    perfect = torch.nn.functional.one_hot(target.clamp(max=2), 3).permute(0, 3, 1, 2).float() * 50
+    loss = DiceCELoss(ignore_index=255)
+    assert loss(perfect, target).item() == pytest.approx(0.0, abs=1e-3)  # ignored pixel does not count
+    assert loss(torch.zeros(1, 3, 2, 2), target).item() > 1.0
+    assert isinstance(build_criterion("ce", 255, None), torch.nn.CrossEntropyLoss)
