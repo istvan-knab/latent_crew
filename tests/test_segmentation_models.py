@@ -99,3 +99,5 @@ def test_dice_ce_loss() -> None:
     assert loss(perfect, target).item() == pytest.approx(0.0, abs=1e-3)  # ignored pixel does not count
     assert loss(torch.zeros(1, 3, 2, 2), target).item() > 1.0
     assert isinstance(build_criterion("ce", 255, None), torch.nn.CrossEntropyLoss)
+    # Label smoothing penalises even a perfect, very confident prediction
+    assert build_criterion("ce", 255, None, label_smoothing=0.1)(perfect, target).item() > 0.1

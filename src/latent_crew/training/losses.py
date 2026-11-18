@@ -14,9 +14,9 @@ class DiceCELoss(nn.Module):
     """
 
     def __init__(self, ignore_index: int, weight: torch.Tensor | None = None, dice_weight: float = 1.0,
-                 smooth: float = 1.0):
+                 smooth: float = 1.0, label_smoothing: float = 0.0):
         super().__init__()
-        self.ce = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index)
+        self.ce = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, label_smoothing=label_smoothing)
         self.ignore_index = ignore_index
         self.dice_weight = dice_weight
         self.smooth = smooth  # keeps the ratio finite for classes with (almost) no pixels
@@ -37,8 +37,13 @@ class DiceCELoss(nn.Module):
         return self.ce(logits, target) + self.dice_weight * dice_loss
 
 
-def build_criterion(name: str, ignore_index: int, class_weight: torch.Tensor | None) -> nn.Module:
-    """`ce`: plain (optionally class-weighted) cross-entropy; `dice_ce`: cross-entropy + soft Dice."""
+def build_criterion(name: str, ignore_index: int, class_weight: torch.Tensor | None,
+                    label_smoothing: float = 0.0) -> nn.Module:
+    """`ce`: plain (optionally class-weighted) cross-entropy; `dice_ce`: cross-entropy + soft Dice.
+
+    `label_smoothing` (0 = off) softens the cross-entropy targets, so the network is not pushed towards
+    over-confident logits on the training pixels (a regulariser against overfitting).
+    """
     if name == "dice_ce":
-        return DiceCELoss(ignore_index, weight=class_weight)
-    return nn.CrossEntropyLoss(weight=class_weight, ignore_index=ignore_index)
+        return DiceCELoss(ignore_index, weight=class_weight, label_smoothing=label_smoothing)
+    return nn.CrossEntropyLoss(weight=class_weight, ignore_index=ignore_index, label_smoothing=label_smoothing)

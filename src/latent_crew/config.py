@@ -76,6 +76,7 @@ class TrainingConfig:
     log_every: int
     early_stopping_patience: int = 0  # validations without val mIoU gain before stopping; 0 = off
     loss: str = "ce"  # ce | dice_ce
+    label_smoothing: float = 0.0  # cross-entropy label smoothing; 0 = off
 
 
 @dataclass
@@ -183,6 +184,8 @@ class SegmentationConfig:
             raise ValueError("training.scheduler must be poly or cosine")
         if t.loss not in ("ce", "dice_ce"):
             raise ValueError("training.loss must be ce or dice_ce")
+        if not 0.0 <= t.label_smoothing < 1.0:
+            raise ValueError("training.label_smoothing must be in [0, 1)")
         if t.class_weighting not in ("none", "median_frequency"):
             raise ValueError("training.class_weighting must be none or median_frequency")
         if min(t.lr, t.batch_size, t.epochs, t.eval_every, t.log_every) <= 0:

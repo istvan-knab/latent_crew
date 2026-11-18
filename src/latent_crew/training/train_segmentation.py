@@ -158,7 +158,7 @@ class SegmentationTrainer:
             class_weight = median_frequency_weights(self.train_set, range(len(self.train_set)), d.num_classes,
                                                     d.ignore_index)
             class_weight = class_weight.to(self.device)
-        self.criterion = build_criterion(t.loss, d.ignore_index, class_weight)
+        self.criterion = build_criterion(t.loss, d.ignore_index, class_weight, t.label_smoothing)
 
     # ---- main loop -------------------------------------------------------------------------------------------------
 

@@ -29,6 +29,7 @@ training:
   warmup_iters: 500
   encoder_lr_mult: 0.1 # encoder LR = lr * encoder_lr_mult (pretrained weights move slower)
   loss: ce # ce | dice_ce (cross-entropy + soft Dice, helps rare classes)
+  label_smoothing: 0.0 # cross-entropy label smoothing, 0 = off (regulariser against overconfidence)
   class_weighting: none # none | median_frequency
   amp: true # mixed precision (bfloat16 on CUDA)
   eval_every: 1 # validate every N epochs
