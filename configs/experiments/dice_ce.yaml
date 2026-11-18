@@ -1,0 +1,8 @@
+# Experiment: cross-entropy + soft Dice loss (Dice scores every class equally, regardless of its pixel count).
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_dicece
+training:
+  loss: dice_ce
+logging:
+  tags: [dice_ce]

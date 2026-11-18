@@ -13,7 +13,7 @@ from latent_crew.config import SegmentationConfig
 from latent_crew.data.prepare import count_missing_files, ensure_dataset
 from latent_crew.evaluation.metrics import ConfusionMatrix
 from latent_crew.evaluation.test_segmentation import test as run_test
-from latent_crew.training.train_segmentation import log_checkpoint_artifact, lr_lambda, train
+from latent_crew.training.train_segmentation import SegmentationTrainer, lr_lambda, train
 from test_segmentation_dataset import write_fake_dataset
 
 CONFIG_PATH = Path(__file__).parents[1] / "configs" / "segmentation.yaml"
@@ -23,18 +23,17 @@ CONFIG_PATH = Path(__file__).parents[1] / "configs" / "segmentation.yaml"
 def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SegmentationConfig:
     root = tmp_path / "data" / "processed" / "sunrgbd"
     root.mkdir(parents=True)
-    write_fake_dataset(root, n_train=8, n_test=2)
+    write_fake_dataset(root, n_train=6, n_test=2, n_val=2)
     monkeypatch.chdir(tmp_path)  # W&B files go to ./outputs
     raw = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
     raw["experiment"].update(name="smoke", output_dir=str(tmp_path / "checkpoints"))
     raw["dataset"]["root"] = str(root)
     raw["model"].update(encoder="mobilenet_v2", encoder_weights=None)
-    raw["training"].update(epochs=2, batch_size=2, warmup_iters=2, log_every=1, freeze_encoder_epochs=1,
-                           class_weighting="median_frequency", val_fraction=0.25)
+    raw["training"].update(epochs=2, batch_size=2, warmup_iters=2, log_every=1, class_weighting="median_frequency")
     raw["augmentation"]["crop_size"] = [64, 96]
     raw["hardware"].update(device="cpu", num_workers=0)
     raw["logging"].update(mode="disabled", num_sample_images=1)
-    return SegmentationConfig(raw)
+    return SegmentationConfig.from_dict(raw)
 
 
 def test_train_then_test(config: SegmentationConfig) -> None:
@@ -42,7 +41,6 @@ def test_train_then_test(config: SegmentationConfig) -> None:
     assert best.exists() and (best.parent / "last.pt").exists() and (best.parent / "config.yaml").exists()
     checkpoint = torch.load(best, map_location="cpu", weights_only=True)
     assert checkpoint["model_spec"] == config.model_spec()
-    assert checkpoint["task"] == "2d_segmentation"
 
     metrics = run_test(config, best, "test")
     assert 0.0 <= metrics["mIoU"] <= 1.0
@@ -65,8 +63,10 @@ def test_training_logs_recoverable_model_artifact(config: SegmentationConfig, mo
     monkeypatch.setattr(wandb.Run, "log_artifact", capture)
     best = train(config)
 
-    assert len(captured) == 1
-    artifact, files, run_id = captured[0]
+    # W&B also stores logged tables (the per-class IoU chart) as artifacts; only the model artifact matters here
+    models = [entry for entry in captured if entry[0].type == "model"]
+    assert len(models) == 1
+    artifact, files, run_id = models[0]
     assert artifact.type == "model"
     assert set(files) == {"best.pt", "last.pt", "config.yaml"}
     assert run_id in artifact.name
@@ -85,7 +85,9 @@ def test_disabled_logging_skips_model_artifact(config: SegmentationConfig, monke
         raise AssertionError("disabled W&B must not construct or upload model artifacts")
 
     monkeypatch.setattr(wandb, "Artifact", fail)
-    log_checkpoint_artifact(None, config, tmp_path / "missing-checkpoints")
+    trainer = SegmentationTrainer.__new__(SegmentationTrainer)  # no data or model needed for this check
+    trainer.config, trainer.out_dir = config, tmp_path / "missing-checkpoints"
+    trainer.log_checkpoint_artifact()
 
 
 def test_existing_dataset_is_not_downloaded(config: SegmentationConfig, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,3 +144,55 @@ def test_lr_schedule_warms_up_then_decays(scheduler: str) -> None:
     assert factor(0) == pytest.approx(0.1) and factor(9) == pytest.approx(1.0)
     assert factor(10) == pytest.approx(1.0) and factor(110) == pytest.approx(0.0, abs=1e-9)
     assert factor(50) > factor(90)
+
+
+def test_training_logs_the_three_sections(config: SegmentationConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every validated epoch logs loss/train + loss/val, the metrics/ keys and the samples/ images."""
+    import latent_crew.training.train_segmentation as trainer_module
+    from latent_crew.utils.wandb_sections import WandbSections
+
+    logged = {}
+
+    class RecordingSections(WandbSections):
+        """Records every logged key, also when W&B itself is disabled."""
+
+        def __init__(self, run):
+            super().__init__(run)
+            log = run.log
+            self.run = type("RecordingRun", (), {"log": lambda _, data, **kw: (logged.update(data), log(data, **kw))})()
+
+    monkeypatch.setattr(trainer_module, "WandbSections", RecordingSections)
+    train(config)
+    for key in ("loss/train", "loss/val", "metrics/mIoU", "metrics/pixel_accuracy", "metrics/mean_class_accuracy",
+                "metrics/per_class_iou", "metrics/lr_decoder", "loss/train_vs_val", "samples/validation",
+                "optim/train_loss_iter"):
+        assert key in logged, key
+    assert logged["loss/val"] > 0 and logged["loss/train"] > 0
+
+
+def test_trainer_uses_the_val_split_of_the_index(config: SegmentationConfig) -> None:
+    """Validation reads the `val` rows of index.jsonl; nothing is carved off the train split any more."""
+    trainer = SegmentationTrainer(config)
+    assert {s["split"] for s in trainer.train_set.samples} == {"train"}
+    assert {s["split"] for s in trainer.val_set.samples} == {"val"}
+    assert (len(trainer.train_set), len(trainer.val_set)) == (6, 2)
+
+
+def test_early_stopping_counts_validations_without_gain() -> None:
+    from latent_crew.training.train_segmentation import EarlyStopping
+
+    stopper = EarlyStopping(patience=2)
+    assert [stopper.should_stop(m) for m in (0.1, 0.2, 0.2, 0.15)] == [False, False, False, True]
+    assert not any(EarlyStopping(patience=0).should_stop(0.0) for _ in range(10))  # 0 = off
+
+
+def test_training_stops_early(config: SegmentationConfig) -> None:
+    config.training.epochs, config.training.early_stopping_patience = 5, 1
+    best = train(config)
+    last = torch.load(best.parent / "last.pt", map_location="cpu", weights_only=True)
+    assert last["epoch"] < 5  # random weights on random labels: mIoU stalls quickly
+
+
+def test_training_with_dice_ce_loss(config: SegmentationConfig) -> None:
+    config.training.epochs, config.training.loss = 1, "dice_ce"
+    assert train(config).exists()

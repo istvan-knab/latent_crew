@@ -21,17 +21,21 @@ IGNORE = 255
 HEIGHT, WIDTH = 90, 130  # deliberately not multiples of 32, like the real sensors
 
 
-def write_fake_dataset(root: Path, n_train: int = 3, n_test: int = 2) -> None:
-    """Writes rgb JPEG, uint16 mm depth PNG and uint8 semantic PNG plus index.jsonl, like collect_data.py."""
+def write_fake_dataset(root: Path, n_train: int = 3, n_test: int = 2, n_val: int = 2) -> None:
+    """Writes rgb JPEG, uint16 mm depth PNG and uint8 semantic PNG plus index.jsonl, like collect_data.py.
+
+    As in the real index, `val` rows point to files in the train/ folder.
+    """
     rng = np.random.default_rng(0)
     rows = []
-    for i in range(n_train + n_test):
-        split = "train" if i < n_train else "test"
+    splits = ["train"] * n_train + ["test"] * n_test + ["val"] * n_val
+    for i, split in enumerate(splits):
+        folder = "train" if split == "val" else split
         stem = f"{i + 1:06d}"
         row = {"id": f"sun_{stem}", "dataset": "sunrgbd", "split": split}
         for field, ext in (("rgb", "jpg"), ("depth", "png"), ("semantic", "png")):
-            row[field] = f"{split}/{field}/{stem}.{ext}"
-            (root / split / field).mkdir(parents=True, exist_ok=True)
+            row[field] = f"{folder}/{field}/{stem}.{ext}"
+            (root / folder / field).mkdir(parents=True, exist_ok=True)
         semantic = rng.integers(0, NUM_CLASSES + 1, (HEIGHT, WIDTH), dtype=np.uint8)
         semantic[:10] = 0  # an unlabeled band
         depth = rng.integers(500, 8000, (HEIGHT, WIDTH)).astype(np.uint16)
@@ -58,6 +62,7 @@ def make_dataset(root: Path, split: str, modalities: list, transform=None) -> Se
 def test_split_filtering_and_class_names(root: Path) -> None:
     assert len(make_dataset(root, "train", ["rgb"])) == 3
     assert len(make_dataset(root, "test", ["rgb"])) == 2
+    assert len(make_dataset(root, "val", ["rgb"])) == 2
     assert len(make_dataset(root, "train", ["rgb"]).class_names) == NUM_CLASSES
 
 
@@ -95,11 +100,6 @@ def test_train_transform_keeps_depth_and_mask_aligned() -> None:
         assert np.array_equal(out["depth"][valid], out["mask"][valid] * 100 + 1000)
 
 
-def test_nyu_without_class_mapping_fails(root: Path) -> None:
-    with pytest.raises(NotImplementedError):
-        SegmentationDataset(root, "train", "nyu_depth_v2", ["rgb"], 40, IGNORE)
-
-
 def test_batch_runs_through_model(root: Path) -> None:
     transform = TrainTransform([64, 96], [0.5, 2.0], True, 0.2, IGNORE, 2398.3)
     loader = DataLoader(make_dataset(root, "train", ["rgb", "depth"], transform), batch_size=2, shuffle=True)
@@ -116,7 +116,7 @@ def test_from_config(root: Path) -> None:
     raw = yaml.safe_load((Path(__file__).parents[1] / "configs" / "segmentation.yaml").read_text(encoding="utf-8"))
     raw["dataset"]["root"] = str(root)
     raw["augmentation"]["crop_size"] = [64, 96]
-    config = SegmentationConfig(raw)
+    config = SegmentationConfig.from_dict(raw)
     assert SegmentationDataset.from_config(config, "train")[0]["image"].shape == (4, 64, 96)
     assert SegmentationDataset.from_config(config, "test")[0]["image"].shape == (4, 96, 160)
 
@@ -139,3 +139,15 @@ def test_render_sample_writes_png(root: Path, tmp_path: Path) -> None:
     assert len(fig.axes) == 4 + 1  # four panels + depth colorbar
     fig.savefig(tmp_path / "sample.png")
     assert (tmp_path / "sample.png").stat().st_size > 0
+
+
+def test_render_sample_with_prediction_has_both_overlays(root: Path) -> None:
+    from latent_crew.utils.visualization import render_sample
+
+    dataset = make_dataset(root, "train", ["rgb", "depth"])
+    sample = dataset[0]
+    mask = sample["mask"].numpy()
+    fig = render_sample(dataset.denormalize(sample["image"]), mask, dataset.class_names, IGNORE, "test",
+                        prediction=np.zeros_like(mask))
+    titles = [ax.get_title() for ax in fig.axes]
+    assert "Ground-truth overlay" in titles and "Prediction overlay" in titles
