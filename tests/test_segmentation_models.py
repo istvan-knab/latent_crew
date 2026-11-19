@@ -86,7 +86,10 @@ def test_experiment_configs_only_change_what_they_list(path: Path) -> None:
     base, experiment = load_raw(), read_yaml(path)
     assert experiment["experiment"]["name"] != base["experiment"]["name"]  # separate checkpoint folder
     changed = {(s, k) for s in base for k in base[s] if experiment[s][k] != base[s][k]}
-    assert ("experiment", "name") in changed and len(changed) <= 4  # name, tags and at most two settings
+    # The file itself (without its base) lists exactly the settings that differ from the baseline
+    own = yaml.safe_load(path.read_text())
+    listed = {(s, k) for s, section in own.items() if s != "base" for k in section}
+    assert ("experiment", "name") in changed and changed <= listed
     SegmentationConfig.load_from_yaml(path)  # valid as a whole
 
 

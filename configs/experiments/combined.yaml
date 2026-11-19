@@ -1,0 +1,13 @@
+# Experiment: the three regularisers together (strong augmentation + label smoothing 0.1 + weight decay 5e-4).
+# Run it after strong_aug and label_smoothing, to see whether their gains add up.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_combined
+training:
+  weight_decay: 0.0005
+  label_smoothing: 0.1
+augmentation:
+  scale_range: [0.5, 2.5]
+  color_jitter: 0.4
+logging:
+  tags: [combined, strong_aug, label_smoothing, weight_decay]

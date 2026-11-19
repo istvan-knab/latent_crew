@@ -1,0 +1,9 @@
+# Experiment: slower pretrained encoder (encoder LR = 0.01 x decoder LR instead of the baseline's 0.1 x),
+# so the ImageNet features change less and overfit less to the small SUN RGB-D training set.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_enclr0.01
+training:
+  encoder_lr_mult: 0.01
+logging:
+  tags: [encoder_lr]
