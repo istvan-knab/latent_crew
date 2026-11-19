@@ -1,0 +1,9 @@
+# Experiment: median-frequency class weights in the cross-entropy (rare classes count more).
+# Only the change against the baseline is listed; everything else comes from the base config.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_classweight
+training:
+  class_weighting: median_frequency
+logging:
+  tags: [class_weighting]

@@ -1,0 +1,8 @@
+# Experiment: 5x stronger weight decay (L2 regularisation) against the overfitting seen in the baseline.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_wd5e-4
+training:
+  weight_decay: 0.0005
+logging:
+  tags: [weight_decay]

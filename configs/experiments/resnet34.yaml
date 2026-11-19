@@ -1,0 +1,9 @@
+# Experiment: smaller ResNet34 encoder (basic blocks, 512 instead of 2048 output channels),
+# so the network has less capacity to memorise the training set.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet34_deeplabv3plus
+model:
+  encoder: resnet34
+logging:
+  tags: [resnet34]

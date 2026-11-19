@@ -1,0 +1,9 @@
+# Experiment: label smoothing 0.1 in the cross-entropy, so the network stops chasing over-confident logits.
+# Note: smoothing raises the loss floor, so compare runs by val mIoU, not by the absolute val loss.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_labelsmooth
+training:
+  label_smoothing: 0.1
+logging:
+  tags: [label_smoothing]
