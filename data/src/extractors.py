@@ -63,6 +63,37 @@ def read_sun_meta(path: Path) -> list[dict]:
     ]
 
 
+def read_sun_boxes3d(path: Path) -> dict[str, dict]:
+    """3D boxes per SUN sample key from SUNRGBDMeta3DBB_v2.mat.
+
+    Boxes are in the upright coordinate system of the SUN RGB-D toolbox (z up, metres), the
+    system that Rtilt maps the camera points to. "size" is the full edge length along the
+    columns of "basis" (the file stores half sizes in "coeffs").
+    """
+    mat = scipy.io.loadmat(path, variable_names=["SUNRGBDMeta"],
+                           squeeze_me=True, struct_as_record=False)
+    result = {}
+    for m in np.atleast_1d(mat["SUNRGBDMeta"]):
+        boxes = []
+        # Samples without boxes hold an empty array instead of box structs
+        for b in np.atleast_1d(m.groundtruth3DBB):
+            if not hasattr(b, "classname"):
+                continue
+            boxes.append({
+                "classname": str(b.classname),
+                "centroid": np.asarray(b.centroid, np.float64).ravel().tolist(),
+                "size": (2 * np.asarray(b.coeffs, np.float64).ravel()).tolist(),
+                "basis": np.asarray(b.basis, np.float64).tolist(),
+                "orientation": np.asarray(b.orientation, np.float64).ravel().tolist(),
+            })
+        result[sun_key(m.sequenceName)] = {
+            "K": np.asarray(m.K, np.float64).tolist(),
+            "Rtilt": np.asarray(m.Rtilt, np.float64).tolist(),
+            "boxes": boxes,
+        }
+    return result
+
+
 def read_sun_split(path: Path) -> tuple[set[str], set[str]]:
     """Train and test sample keys from allsplit.mat."""
     mat = scipy.io.loadmat(path, variable_names=["alltrain", "alltest"], squeeze_me=True)

@@ -18,10 +18,11 @@ from latent_crew.utils.runtime import init_wandb, resolve_device, seed_everythin
 
 
 def parse_args() -> argparse.Namespace:
+    """Command-line arguments: config, checkpoint and split."""
     parser = argparse.ArgumentParser(description="Evaluates a trained segmentation checkpoint.")
     parser.add_argument("--config", required=True, help="Path to the YAML config file (dataset, hardware, logging)")
     parser.add_argument("--checkpoint", required=True, help="Path to the trained checkpoint")
-    parser.add_argument("--split", default="test", choices=("train", "test"))
+    parser.add_argument("--split", default="test", choices=("train", "val", "test"))
     return parser.parse_args()
 
 
@@ -43,7 +44,8 @@ def test(config: SegmentationConfig, checkpoint_path: str | Path, split: str = "
     ensure_dataset(d.name, d.root)
     dataset = SegmentationDataset.from_config(config, split, augment=False)
     loader = DataLoader(dataset, batch_size=1, num_workers=config.hardware.num_workers, pin_memory=device.type == "cuda")
-    metrics = evaluate(model, loader, d.num_classes, d.ignore_index, device, config.training.amp).compute(dataset.class_names)
+    confusion, _ = evaluate(model, loader, d.num_classes, d.ignore_index, device, config.training.amp)
+    metrics = confusion.compute(dataset.class_names)
 
     print(f"{split}: mIoU {metrics['mIoU']:.4f}, pixel accuracy {metrics['pixel_accuracy']:.4f}, "
           f"mean class accuracy {metrics['mean_class_accuracy']:.4f} ({len(dataset)} images)")
@@ -69,6 +71,7 @@ def test(config: SegmentationConfig, checkpoint_path: str | Path, split: str = "
 
 
 def main() -> None:
+    """Command-line entry point."""
     args = parse_args()
     test(SegmentationConfig.load_from_yaml(args.config), args.checkpoint, args.split)
 

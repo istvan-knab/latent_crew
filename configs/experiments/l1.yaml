@@ -1,0 +1,8 @@
+# Experiment: L1 penalty on the conv / linear weights (pushes small weights to zero), baseline weight decay (L2) kept.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_l1
+training:
+  l1_lambda: 1.0e-5
+logging:
+  tags: [l1]

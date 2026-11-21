@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 import segmentation_models_pytorch as smp
 import timm
 from torch import nn
+from torch.nn import functional as F
 
 # Decoders selectable in the config (key = model.decoder). See docs/segmentation_models.md.
 DECODERS = ("unet", "fpn", "deeplabv3", "deeplabv3plus", "pspnet", "upernet", "segformer")
@@ -27,7 +28,7 @@ def build_segmentation_model(spec: Dict[str, Any], pretrained: bool = True) -> n
     """
     check_model_names(spec["decoder"], spec["encoder"])
     try:
-        return smp.create_model(
+        model = smp.create_model(
             arch=spec["decoder"],
             encoder_name=spec["encoder"],
             encoder_weights=spec["encoder_weights"] if pretrained else None,
@@ -40,12 +41,19 @@ def build_segmentation_model(spec: Dict[str, Any], pretrained: bool = True) -> n
             f"Encoder {spec['encoder']!r} cannot be combined with decoder {spec['decoder']!r} "
             f"(in_channels={spec['in_channels']}): {error}"
         ) from error
+    add_head_dropout(model, spec.get("dropout", 0.0))  # older checkpoints have no "dropout" key
+    return model
 
 
-def set_encoder_trainable(model: nn.Module, trainable: bool) -> None:
-    """Freezes or unfreezes the encoder (used for the optional frozen-encoder warmup)."""
-    for param in model.encoder.parameters():
-        param.requires_grad = trainable
+def add_head_dropout(model: nn.Module, p: float) -> None:
+    """Channel dropout (Dropout2d) on the decoder features right before the 1x1 classifier; p=0 = off.
+
+    Same place as the dropout of the classic DeepLab / PSPNet heads (mmsegmentation default 0.1). It is a forward
+    pre-hook, so the parameter names (and old checkpoints) stay unchanged; it is only active in train() mode.
+    """
+    if p > 0:
+        model.segmentation_head.register_forward_pre_hook(
+            lambda module, args: (F.dropout2d(args[0], p, module.training),))
 
 
 def param_groups(model: nn.Module, lr: float, encoder_lr_mult: float) -> List[Dict[str, Any]]:

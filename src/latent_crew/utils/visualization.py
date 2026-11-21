@@ -40,6 +40,12 @@ def colorize_mask(mask: np.ndarray, palette: np.ndarray, ignore_index: int) -> n
     return color
 
 
+def overlay(rgb: np.ndarray, mask_rgb: np.ndarray, ignored: np.ndarray, alpha: float = 0.5) -> np.ndarray:
+    """Blends the coloured mask into the RGB image; ignored pixels show the plain RGB."""
+    blended = ((1 - alpha) * rgb + alpha * mask_rgb).astype(np.uint8)
+    return np.where(ignored[..., None], rgb, blended)
+
+
 def render_sample(
     views: Dict[str, np.ndarray],
     mask: np.ndarray,
@@ -65,9 +71,11 @@ def render_sample(
         shown_prediction = np.where(mask == ignore_index, ignore_index, prediction)
         panels.append(("Prediction", colorize_mask(shown_prediction, palette, ignore_index)))
     if "rgb" in views:
-        ignored = (mask == ignore_index)[..., None]
-        overlay = np.where(ignored, views["rgb"], (0.5 * views["rgb"] + 0.5 * mask_rgb).astype(np.uint8))
-        panels.append(("Overlay", overlay))
+        panels.append(("Ground-truth overlay", overlay(views["rgb"], mask_rgb, mask == ignore_index)))
+        if prediction is not None:
+            # Same blending and the same ignored pixels as the ground-truth overlay, so the two compare directly
+            prediction_rgb = colorize_mask(prediction, palette, ignore_index)
+            panels.append(("Prediction overlay", overlay(views["rgb"], prediction_rgb, mask == ignore_index)))
 
     fig, axes = plt.subplots(1, len(panels), figsize=(4.5 * len(panels), 4.6), layout="constrained")
     for ax, (name, image) in zip(axes, panels):
@@ -91,9 +99,10 @@ def render_sample(
 
 
 def parse_args() -> argparse.Namespace:
+    """Command-line arguments: which sample to show and where to save it."""
     parser = argparse.ArgumentParser(description="Shows one segmentation sample: RGB, depth, mask, overlay.")
     parser.add_argument("--config", required=True, help="Path to the YAML config file")
-    parser.add_argument("--split", default="train", choices=("train", "test"))
+    parser.add_argument("--split", default="train", choices=("train", "val", "test"))
     which = parser.add_mutually_exclusive_group()
     which.add_argument("--index", type=int, default=0, help="Position within the split")
     which.add_argument("--id", help="Sample id from index.jsonl, e.g. sun_000123")
@@ -103,6 +112,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Command-line entry point: renders one sample and saves it as PNG."""
     args = parse_args()
     config = SegmentationConfig.load_from_yaml(args.config)
     dataset = SegmentationDataset.from_config(config, args.split, augment=args.augment)

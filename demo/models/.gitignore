@@ -1,0 +1,3 @@
+# Model checkpoints are large: keep them out of Git (see demo/README.md)
+*
+!.gitignore

@@ -1,0 +1,9 @@
+# Experiment: Dropout2d (p=0.1) on the decoder features before the 1x1 classifier, as in the classic DeepLab/PSPNet
+# heads. (The ASPP module of smp DeepLabV3+ already has a fixed dropout of 0.5; this adds one more right at the head.)
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_dropout0.1
+model:
+  dropout: 0.1
+logging:
+  tags: [dropout]
