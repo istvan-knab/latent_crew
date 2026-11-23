@@ -17,11 +17,12 @@ import numpy as np
 import torch
 import wandb
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
 from latent_crew.config import SegmentationConfig
 from latent_crew.data.prepare import ensure_dataset
+from latent_crew.data.rare_classes import repeat_factors
 from latent_crew.data.segmentation_dataset import SegmentationDataset
 from latent_crew.evaluation.evaluate import evaluate, sample_images
 from latent_crew.models.segmentation import build_segmentation_model, param_groups
@@ -131,9 +132,15 @@ class SegmentationTrainer:
         workers = c.hardware.num_workers
         loader_args = {"num_workers": workers, "pin_memory": self.device.type == "cuda",
                        "persistent_workers": workers > 0}
+        generator = torch.Generator().manual_seed(c.experiment.seed)
+        sampler = None
+        if c.augmentation.repeat_factor_threshold > 0:
+            weights = repeat_factors(self.train_set.class_pixel_counts(), c.augmentation.repeat_factor_threshold)
+            # As many draws per epoch as there are images, so epochs and the LR schedule stay comparable
+            sampler = WeightedRandomSampler(weights.tolist(), len(self.train_set), replacement=True, generator=generator)
         # drop_last: a final batch of 1 would break BatchNorm in train mode
-        self.train_loader = DataLoader(self.train_set, batch_size=t.batch_size, shuffle=True, drop_last=True,
-                                       generator=torch.Generator().manual_seed(c.experiment.seed), **loader_args)
+        self.train_loader = DataLoader(self.train_set, batch_size=t.batch_size, shuffle=sampler is None,
+                                       sampler=sampler, drop_last=True, generator=generator, **loader_args)
         # Batch size 1: validation runs at full resolution and image sizes differ between sensors
         self.val_loader = DataLoader(self.val_set, batch_size=1, **loader_args)
 
@@ -277,10 +284,11 @@ class SegmentationTrainer:
     def log_checkpoint_artifact(self) -> None:
         """Attaches best.pt, last.pt and config.yaml to the run as a W&B `model` artifact.
 
-        Online runs upload it, offline runs stage it for a later `wandb sync`, disabled logging skips it.
+        Online runs upload it, offline runs stage it for a later `wandb sync`; disabled logging or
+        `logging.log_model: false` (sweep trials) skips it and keeps the checkpoints local only.
         """
         c = self.config
-        if c.logging.mode == "disabled":
+        if c.logging.mode == "disabled" or not c.logging.log_model:
             return
         name = f"segmentation-{self.run.id}"
         artifact = wandb.Artifact(

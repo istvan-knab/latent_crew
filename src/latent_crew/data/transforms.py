@@ -6,7 +6,7 @@ so workers draw different augmentations and seed_everything() makes runs reprodu
 """
 
 import random
-from typing import Dict, List
+from typing import Dict, List, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -53,7 +53,12 @@ def color_jitter(rgb: np.ndarray, strength: float) -> np.ndarray:
 
 
 class TrainTransform:
-    """Random scale -> pad -> random crop -> horizontal flip -> colour jitter."""
+    """Random scale -> pad -> random crop -> horizontal flip -> colour jitter.
+
+    With probability `rare_crop_prob` the crop is placed around a pixel of one of `rare_classes` (when the scaled
+    sample has one), so the random crop does not cut small rare objects away. The pixel lands at a random position
+    inside the crop, not always in its centre.
+    """
 
     def __init__(
         self,
@@ -63,6 +68,8 @@ class TrainTransform:
         color_jitter: float,
         ignore_index: int,
         depth_fill: float,
+        rare_classes: Sequence[int] = (),
+        rare_crop_prob: float = 0.0,
     ):
         self.crop_h, self.crop_w = crop_size
         self.scale_range = scale_range
@@ -70,6 +77,8 @@ class TrainTransform:
         self.color_jitter = color_jitter
         self.ignore_index = ignore_index
         self.depth_fill = depth_fill
+        self.rare_classes = np.asarray(rare_classes, dtype=np.int64)
+        self.rare_crop_prob = rare_crop_prob
 
     def __call__(self, sample: Sample) -> Sample:
         h, w = sample["mask"].shape
@@ -77,9 +86,7 @@ class TrainTransform:
         sample = resize(sample, round(h * scale), round(w * scale))
         sample = pad_to(sample, self.crop_h, self.crop_w, self.ignore_index, self.depth_fill)
 
-        h, w = sample["mask"].shape
-        top = random.randint(0, h - self.crop_h)
-        left = random.randint(0, w - self.crop_w)
+        top, left = self._crop_origin(sample["mask"])
         sample = {k: v[top : top + self.crop_h, left : left + self.crop_w] for k, v in sample.items()}
 
         if self.hflip and random.random() < 0.5:
@@ -87,6 +94,21 @@ class TrainTransform:
         if self.color_jitter > 0:
             sample["rgb"] = color_jitter(sample["rgb"], self.color_jitter)
         return sample
+
+    def _crop_origin(self, mask: np.ndarray) -> Tuple[int, int]:
+        """Top-left corner of the crop: uniform, or (rare_crop_prob) such that a rare-class pixel is inside."""
+        h, w = mask.shape
+        if self.rare_classes.size and random.random() < self.rare_crop_prob:
+            present = np.intersect1d(np.unique(mask), self.rare_classes)
+            if present.size:
+                c = int(random.choice(present))  # class-balanced among the rare classes in view
+                ys, xs = np.nonzero(mask == c)
+                j = random.randrange(ys.size)
+                # The pixel ends up anywhere inside the crop; clamping keeps it inside as well
+                top = int(ys[j]) - random.randint(0, self.crop_h - 1)
+                left = int(xs[j]) - random.randint(0, self.crop_w - 1)
+                return min(max(top, 0), h - self.crop_h), min(max(left, 0), w - self.crop_w)
+        return random.randint(0, h - self.crop_h), random.randint(0, w - self.crop_w)
 
 
 class EvalTransform:

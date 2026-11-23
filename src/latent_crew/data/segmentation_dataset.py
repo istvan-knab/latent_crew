@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Sequence
 
 import cv2
 import numpy as np
@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import Dataset
 
 from latent_crew.config import SegmentationConfig
+from latent_crew.data.rare_classes import CopyPaste, class_pixel_counts, rare_classes
 from latent_crew.data.transforms import EvalTransform, TrainTransform
 
 # ImageNet statistics, because the encoders are pretrained on ImageNet (0-1 scale)
@@ -20,8 +21,12 @@ RGB_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 DEPTH_STATS_MM = {"sunrgbd": (2398.3, 1248.9)}
 
 
-def build_transform(config: SegmentationConfig, augment: bool) -> TrainTransform | EvalTransform:
-    """Random training augmentation, or padding-only evaluation transform when `augment` is False."""
+def build_transform(config: SegmentationConfig, augment: bool,
+                    rare: Sequence[int] = ()) -> TrainTransform | EvalTransform:
+    """Random training augmentation, or padding-only evaluation transform when `augment` is False.
+
+    `rare` are the rare class ids for the rare-class-centred crop (augmentation.rare_crop_prob).
+    """
     d, a = config.dataset, config.augmentation
     depth_mean, _ = DEPTH_STATS_MM[d.name]
     if not augment:
@@ -33,6 +38,8 @@ def build_transform(config: SegmentationConfig, augment: bool) -> TrainTransform
         color_jitter=a.color_jitter,
         ignore_index=d.ignore_index,
         depth_fill=depth_mean,
+        rare_classes=rare,
+        rare_crop_prob=a.rare_crop_prob,
     )
 
 
@@ -41,6 +48,7 @@ class SegmentationDataset(Dataset):
 
     Channels follow `modalities`: rgb (3, ImageNet-normalised), then depth (1, dataset-normalised).
     Labels are remapped: 0 (unlabeled) -> ignore_index, k -> k - 1, so the classes are 0 .. num_classes - 1.
+    An optional `copy_paste` (rare_classes.CopyPaste) runs on the raw sample before `transform`.
     """
 
     def __init__(
@@ -52,12 +60,15 @@ class SegmentationDataset(Dataset):
         num_classes: int,
         ignore_index: int,
         transform: Callable[[Dict[str, np.ndarray]], Dict[str, np.ndarray]] | None = None,
+        copy_paste: CopyPaste | None = None,
     ):
         self.root = Path(root)
         self.modalities = modalities
         self.num_classes = num_classes
         self.ignore_index = ignore_index
         self.transform = transform
+        self.copy_paste = copy_paste
+        self._class_pixels: np.ndarray | None = None
         self.depth_mean, self.depth_std = DEPTH_STATS_MM[dataset]
 
         index = self.root / "index.jsonl"
@@ -73,22 +84,33 @@ class SegmentationDataset(Dataset):
 
     @classmethod
     def from_config(cls, config: SegmentationConfig, split: str, augment: bool | None = None) -> "SegmentationDataset":
-        """Train split gets random augmentation, every other split only padding (override with augment)."""
-        d = config.dataset
+        """Train split gets random augmentation, every other split only padding (override with augment).
+
+        The rare-class augmentations (copy-paste, rare-class crop) are only built when switched on in the config;
+        the rare classes are then measured on this split.
+        """
+        d, a = config.dataset, config.augmentation
         augment = split == "train" if augment is None else augment
-        return cls(d.root, split, d.name, d.modalities, d.num_classes, d.ignore_index, build_transform(config, augment))
+        dataset = cls(d.root, split, d.name, d.modalities, d.num_classes, d.ignore_index)
+        rare: List[int] = []
+        if augment and (a.copy_paste_prob > 0 or a.rare_crop_prob > 0):
+            counts = dataset.class_pixel_counts()
+            rare = rare_classes(counts, a.rare_classes)
+            print(f"Rare classes ({split}): " + ", ".join(dataset.class_names[c] for c in rare))
+            if a.copy_paste_prob > 0:
+                dataset.copy_paste = CopyPaste(dataset.raw_sample, counts, rare, a.copy_paste_prob,
+                                               a.copy_paste_max_objects)
+        dataset.transform = build_transform(config, augment, rare)
+        return dataset
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, i: int) -> Dict[str, torch.Tensor | str]:
         row = self.samples[i]
-        sample = {
-            # OpenCV reads BGR; the pretrained encoders expect RGB
-            "rgb": cv2.cvtColor(self._read(row["rgb"]), cv2.COLOR_BGR2RGB),
-            "depth": self._read(row["depth"]).astype(np.float32),  # uint16 mm
-            "mask": self._remap_labels(self._read(row["semantic"])),
-        }
+        sample = self.raw_sample(i)
+        if self.copy_paste is not None:
+            sample = self.copy_paste(sample, i)
         if self.transform is not None:
             sample = self.transform(sample)
 
@@ -105,6 +127,25 @@ class SegmentationDataset(Dataset):
             "mask": torch.from_numpy(np.ascontiguousarray(sample["mask"])),
             "id": row["id"],
         }
+
+    def raw_sample(self, i: int) -> Dict[str, np.ndarray]:
+        """Sample i before any transform: rgb uint8 [H, W, 3], depth float32 mm [H, W], remapped mask int64 [H, W]."""
+        row = self.samples[i]
+        return {
+            # OpenCV reads BGR; the pretrained encoders expect RGB
+            "rgb": cv2.cvtColor(self._read(row["rgb"]), cv2.COLOR_BGR2RGB),
+            "depth": self._read(row["depth"]).astype(np.float32),  # uint16 mm
+            "mask": self._remap_labels(self._read(row["semantic"])),
+        }
+
+    def class_pixel_counts(self) -> np.ndarray:
+        """Pixels per class and image, int64 [len(self), num_classes]; cached as class_pixels_<split>.npz in root."""
+        if self._class_pixels is None:
+            split = self.samples[0]["split"]
+            self._class_pixels = class_pixel_counts(self.label_mask, [r["id"] for r in self.samples],
+                                                    self.num_classes, self.ignore_index,
+                                                    self.root / f"class_pixels_{split}.npz")
+        return self._class_pixels
 
     def label_mask(self, i: int) -> np.ndarray:
         """Remapped label mask of sample i at full resolution, without reading the images (for class statistics)."""

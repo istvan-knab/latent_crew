@@ -196,3 +196,15 @@ def test_training_stops_early(config: SegmentationConfig) -> None:
 def test_training_with_dice_ce_loss(config: SegmentationConfig) -> None:
     config.training.epochs, config.training.loss = 1, "dice_ce"
     assert train(config).exists()
+
+
+def test_training_with_rare_class_augmentation(config: SegmentationConfig) -> None:
+    """Copy-paste, rare-class crop and repeat-factor sampling all on (tests/test_rare_classes.py has the unit tests)."""
+    a = config.augmentation
+    a.copy_paste_prob, a.rare_crop_prob, a.repeat_factor_threshold, a.rare_classes = 1.0, 1.0, 1.0, 5
+    config.training.epochs = 1
+    trainer = SegmentationTrainer(config)
+    assert trainer.train_set.copy_paste is not None
+    assert isinstance(trainer.train_loader.sampler, torch.utils.data.WeightedRandomSampler)
+    assert (Path(config.dataset.root) / "class_pixels_train.npz").exists()
+    assert trainer.fit().exists()

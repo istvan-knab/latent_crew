@@ -1,0 +1,54 @@
+# W&B sweep: Bayesian hyperparameter search over the segmentation baseline. All trials live in one sweep in W&B
+# (one table, parallel-coordinates and importance plots) instead of separate runs in the project.
+# Start: scripts/sweep_segmentation.sh configs/sweeps/segmentation.yaml [trials]   (see README, "Hyperparameter sweep")
+# Every trial trains configs/sweeps/trial.yaml with the sampled values deep-merged in; parameters are nested
+# exactly like the config sections, so `training: {lr: ...}` overrides training.lr.
+project: latent-crew
+name: segmentation-hpo
+method: bayes
+metric:
+  name: metrics/mIoU # validation mIoU, logged every epoch; the sweep ranks a trial by its best epoch
+  goal: maximize
+early_terminate: # Hyperband stops trials that are clearly behind the others at epochs 10 and 30
+  type: hyperband
+  min_iter: 10 # counted in logged validations = epochs (training.eval_every: 1)
+  eta: 3
+command: # what `wandb agent` runs per trial, from the repository root
+  - ${env}
+  - python
+  - -m
+  - latent_crew.training.sweep
+  - trial
+  - --config
+  - configs/sweeps/trial.yaml
+parameters:
+  training:
+    parameters:
+      lr: # decoder LR (SGD); baseline 0.01
+        distribution: log_uniform_values
+        min: 0.003
+        max: 0.03
+      encoder_lr_mult: # encoder LR = lr * encoder_lr_mult; baseline 0.1
+        distribution: log_uniform_values
+        min: 0.03
+        max: 0.5
+      weight_decay: # baseline 1e-4
+        distribution: log_uniform_values
+        min: 0.00001
+        max: 0.001
+      batch_size:
+        values: [8, 16]
+      loss:
+        values: [ce, dice_ce]
+      class_weighting:
+        values: [none, median_frequency]
+      label_smoothing:
+        values: [0.0, 0.05, 0.1]
+  augmentation:
+    parameters:
+      color_jitter: # baseline 0.2
+        distribution: uniform
+        min: 0.0
+        max: 0.5
+      scale_range: # baseline [0.5, 2.0]
+        values: [[0.75, 1.5], [0.5, 2.0], [0.5, 2.5]]
