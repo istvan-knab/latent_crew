@@ -9,9 +9,24 @@ dependencies = [
     "numpy",
     "opencv-python",
     "open3d",
-    "scipy",
+    "scipy<1.18",
     "pyyaml",
     "tqdm",
+    "segmentation-models-pytorch>=0.5.0",
+    "timm>=1.0.30",
+    "matplotlib>=3.11.2",
+    "wandb>=0.31.0",
+    "h5py<3.16",
+    "requests>=2.34.2",
+    "pillow>=12.3.0",
+]
+
+[project.optional-dependencies]
+# Live Intel RealSense view (demo/realsense_stream.py): uv run --extra camera ... or demo/realsense_stream.sh
+# Not needed for training; Docker and plain `uv sync` leave it out.
+camera = [
+    "pyrealsense2-macosx>=2.56.5; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "pyrealsense2>=2.56; sys_platform == 'win32' or (sys_platform == 'linux' and platform_machine == 'x86_64')",
 ]
 
 [build-system]
@@ -20,3 +35,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

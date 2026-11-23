@@ -1,0 +1,12 @@
+# GPU override for NVIDIA machines (e.g. the DGX Spark). Kept separate so the base file still runs on machines
+# without an NVIDIA GPU (e.g. macOS). Needs the NVIDIA Container Toolkit on the host. Usage:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml run --rm latent-crew <script>
+services:
+  latent-crew:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
