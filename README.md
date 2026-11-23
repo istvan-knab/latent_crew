@@ -37,12 +37,12 @@ Plan:
 ```
 data/       Dataset download, preparation and evaluation; data/README.md describes the data
 docs/       Documentation; docs/milestones/ holds one notebook per milestone
-docker/     Dockerfile, docker-compose.yml (+ docker-compose.gpu.yml for NVIDIA GPUs)
-scripts/    entry-point shell scripts (train, test, visualise)
-configs/    YAML config files (configs/segmentation.yaml)
-src/        latent_crew Python package (config, data, models, training, evaluation, utils)
-tests/      pytest suite (runs on synthetic data, CPU only)
-demo/       demo scripts (live RealSense view) and, later, the best models; see demo/README.md
+docker/     Dockerfile, docker-compose.yml
+scripts/    entry-point shell scripts (train/test per task, full app)
+configs/    YAML config files
+src/        latent_crew Python package (data, models, training, evaluation, utils)
+app/        web app
+temp/       2D MNIST baseline classifier (TensorFlow, W&B) used to try out the training workflow
 ```
 
 Main files:
@@ -58,7 +58,7 @@ Main files:
 | `data/reports/data_evaluation.md` | Result of the last data evaluation |
 | `pyproject.toml`, `uv.lock` | Python environment of the `latent_crew` package |
 | `docker/Dockerfile`, `docker/docker-compose.yml` | Reference Docker environment |
-| `configs/segmentation.yaml`, `scripts/*.sh`, `src/latent_crew/` | 2D semantic segmentation on SUN RGB-D: training, evaluation, visualisation |
+| `configs/default.yaml`, `scripts/*.sh`, `src/latent_crew/` | Training and evaluation skeleton for the next milestones (not implemented yet) |
 
 ## Software environment
 
@@ -83,7 +83,9 @@ jupyter notebook docs/milestones/milestone_1.ipynb
 
 The notebook shows the stored results of the data pipeline; the data description and options (train/val/test ratio, 3D boxes) are in [`data/README.md`](data/README.md). On Colab the first cell can run the pipeline (`RUN_PIPELINE = True`).
 
-### Segmentation (training and testing)
+### Later milestones (training, testing, app)
+
+The commands below belong to the next milestones; the training and evaluation code is not implemented yet.
 
 Every command can be run locally (with uv) or inside Docker. The same `latent-crew` Compose service runs every script.
 
