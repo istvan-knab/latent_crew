@@ -39,10 +39,9 @@ data/       Dataset download, preparation and evaluation; data/README.md describ
 docs/       Documentation; docs/milestones/ holds one notebook per milestone
 docker/     Dockerfile, docker-compose.yml
 scripts/    entry-point shell scripts (train/test per task, full app)
-configs/    YAML config files
+configs/    YAML config files (segmentation.yaml, detection.yaml, experiments/)
 src/        latent_crew Python package (data, models, training, evaluation, utils)
-app/        web app
-temp/       2D MNIST baseline classifier (TensorFlow, W&B) used to try out the training workflow
+demo/       live Intel RealSense camera viewer
 ```
 
 Main files:
@@ -58,7 +57,8 @@ Main files:
 | `data/reports/data_evaluation.md` | Result of the last data evaluation |
 | `pyproject.toml`, `uv.lock` | Python environment of the `latent_crew` package |
 | `docker/Dockerfile`, `docker/docker-compose.yml` | Reference Docker environment |
-| `configs/default.yaml`, `scripts/*.sh`, `src/latent_crew/` | Training and evaluation skeleton for the next milestones (not implemented yet) |
+| `configs/segmentation.yaml`, `configs/detection.yaml` | Segmentation and 2D detection run configs |
+| `src/latent_crew/`, `scripts/*.sh` | Training, evaluation and inference code for segmentation and 2D detection |
 
 ## Software environment
 
@@ -198,6 +198,49 @@ docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/test_se
 ```
 
 Tests: `uv run pytest -q` (includes an end-to-end training run on synthetic data, CPU, W&B off).
+
+### Train 2D detection
+
+2D object detection uses [Ultralytics YOLO26](https://docs.ultralytics.com/models/yolo26/) and its own config, `configs/detection.yaml` (run name and seed, dataset paths and class count, pretrained weights, image size, hyperparameters, W&B logging). Only **SUN RGB-D** is used: it is the only dataset here with 2D box annotations (`SUNRGBDMeta2DBB_v2.mat`); NYU Depth V2 has none and is left out of detection.
+
+At start the script makes sure `data/processed/sunrgbd/` exists (running `data/scripts/collect_data.py` only if something is missing, as segmentation does), then builds a YOLO-format dataset once from the processed images and the SUN 2D boxes into `data/processed/sunrgbd_yolo/` (images + `labels/*.txt` + `data.yaml` + `classes.json`). The build keeps the `dataset.num_classes` most frequent class names, drops boxes smaller than `dataset.min_box_size` px, and follows the same `train`/`val`/`test` split as `index.jsonl`. Later runs reuse the built dataset (`--rebuild-data` forces a rebuild).
+
+Put your Weights & Biases key in `.env` (`cp .env.example .env`, then fill in `WANDB_API_KEY`), or log in once locally with `uv run wandb login`; set `logging.mode: disabled` to train without W&B.
+
+```bash
+scripts/train_detection.sh configs/detection.yaml
+```
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml run --rm latent-crew scripts/train_detection.sh configs/detection.yaml
+```
+
+The run is reproducible: `experiment.seed` seeds Python/NumPy/PyTorch (`deterministic=True`), the YOLO dataset build is deterministic, and the resolved config is written to the run directory. Ultralytics writes everything to `checkpoints/<experiment.name>/`: `weights/best.pt` and `weights/last.pt` (plus a copy of `best.pt` in the run root), training/validation curves, a confusion matrix, example batches, `results.csv`, and `resolved_config.yaml`. Model selection uses the `val` split; the `test` split is only touched by the test script.
+
+Useful overrides (also handy for a quick smoke run): `--epochs N`, `--batch-size N`, `--device cpu|cuda`, `--no-wandb`, `--rebuild-data`.
+
+### Test 2D detection
+
+Runs the Ultralytics validator and reports the standard detection metrics — **mAP@0.5**, **mAP@0.5:0.95**, **precision** and **recall** — then saves them to `checkpoints/<experiment.name>/metrics_<split>.json`. Default split is `val`; pass `test` for the held-out official test split.
+
+```bash
+scripts/test_detection.sh configs/detection.yaml checkpoints/sunrgbd_yolo26n_2d/best.pt val
+```
+
+```bash
+docker compose -f docker/docker-compose.yml run --rm latent-crew scripts/test_detection.sh configs/detection.yaml checkpoints/sunrgbd_yolo26n_2d/best.pt val
+```
+
+### Inference 2D detection (draw boxes on an image)
+
+Runs the trained detector on one image (or a folder) and saves the image with a labelled bounding box per detected object to `checkpoints/<experiment.name>/predictions/`. With no `--image`, the first validation image is used, so it works right after training:
+
+```bash
+uv run python -m latent_crew.evaluation.infer_detection \
+  --config configs/detection.yaml \
+  --checkpoint checkpoints/sunrgbd_yolo26n_2d/best.pt \
+  --image path/to/image.jpg
+```
 
 ### Demo: live RealSense camera view
 

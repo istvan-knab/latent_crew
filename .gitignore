@@ -223,3 +223,7 @@ __marimo__/
 /data/processed/
 /checkpoints/
 /outputs/
+
+# Ultralytics YOLO: pretrained weights auto-downloaded to the repo root, and its runs dir
+/yolo*.pt
+/runs/

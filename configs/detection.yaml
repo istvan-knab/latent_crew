@@ -1,0 +1,36 @@
+# 2D object detection config (Ultralytics YOLO26 on SUN RGB-D).
+# The 2D boxes come from the SUN RGB-D metadata (SUNRGBDMeta2DBB_v2.mat); NYU Depth V2 has no 2D boxes.
+# A YOLO dataset is built once from the processed data and the SUN metadata, then YOLO trains on it.
+
+experiment:
+  name: sunrgbd_yolo26n_2d
+  seed: 42
+  output_dir: checkpoints # run artifacts go to <output_dir>/<name>/ (gitignored)
+
+dataset:
+  name: sunrgbd # only SUN RGB-D has 2D boxes; NYU Depth V2 is not usable for detection
+  root: data/processed/sunrgbd # processed data + index.jsonl (built by data/scripts/collect_data.py)
+  raw_root: data/raw # holds sunrgbd/metadata/SUNRGBDMeta2DBB_v2.mat (the 2D box source)
+  yolo_root: data/processed/sunrgbd_yolo # generated YOLO dataset (images symlinked/copied + labels)
+  num_classes: 10 # keep the N most frequent class names; the rest are dropped (see build log)
+  min_box_size: 4 # drop boxes smaller than this many pixels on either side (noise)
+
+model:
+  weights: yolo26n.pt # pretrained YOLO26 nano; downloaded by ultralytics on first use
+  imgsz: 640 # training/val image size (letterboxed)
+
+training:
+  epochs: 50
+  batch_size: 16 # fits comfortably in 16 GB VRAM at imgsz 640
+  optimizer: auto # ultralytics picks AdamW/SGD and the LR; set lr0 to override
+  lr0: 0.01
+  patience: 15 # early-stopping patience in epochs (0 = off)
+  workers: 8
+  cache: false # true caches images in RAM; SUN RGB-D is ~5k train images, keep off by default
+
+hardware:
+  device: cuda # cuda | cpu; fails early if cuda is requested but unavailable
+
+logging:
+  project: latent-crew
+  mode: online # online | offline | disabled (Weights & Biases)
