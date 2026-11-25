@@ -20,11 +20,11 @@ model:
   imgsz: 640 # training/val image size (letterboxed)
 
 training:
-  epochs: 50
+  epochs: 20 # reproducible baseline; raise for a longer run (the ticket allows imperfect accuracy)
   batch_size: 16 # fits comfortably in 16 GB VRAM at imgsz 640
   optimizer: auto # ultralytics picks AdamW/SGD and the LR; set lr0 to override
   lr0: 0.01
-  patience: 15 # early-stopping patience in epochs (0 = off)
+  patience: 10 # early-stopping patience in epochs (0 = off)
   workers: 8
   cache: false # true caches images in RAM; SUN RGB-D is ~5k train images, keep off by default
 

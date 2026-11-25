@@ -128,8 +128,8 @@ class DetectionConfig:
 
     @property
     def run_dir(self) -> Path:
-        """<output_dir>/<name>: where the YOLO run (weights, metrics, plots) is written."""
-        return Path(self.experiment.output_dir) / self.experiment.name
+        """<output_dir>/<name>: where the YOLO run (weights, metrics, plots) is written (absolute)."""
+        return (Path(self.experiment.output_dir) / self.experiment.name).resolve()
 
     def _validate(self) -> None:
         """Fails early with a readable message instead of deep inside training."""

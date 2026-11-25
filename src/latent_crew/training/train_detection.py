@@ -86,7 +86,8 @@ def main() -> None:
     from ultralytics import YOLO
 
     model = YOLO(config.model.weights)
-    run_parent = Path(config.experiment.output_dir)
+    # Absolute path so ultralytics writes to <output_dir>/<name> directly, not under its default runs/detect/.
+    run_parent = Path(config.experiment.output_dir).resolve()
     results = model.train(
         data=str(data_yaml),
         epochs=config.training.epochs,
