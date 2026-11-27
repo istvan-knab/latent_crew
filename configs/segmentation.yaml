@@ -43,6 +43,12 @@ augmentation: # geometric ops apply to rgb, depth and mask alike; color jitter t
   scale_range: [0.5, 2.0]
   hflip: true
   color_jitter: 0.2
+  # Rare-class augmentation, all off here (configs/experiments/{copy_paste,rare_sampling,rare_class_aug}.yaml)
+  rare_classes: 12 # the 12 classes with the smallest pixel share in the train split count as rare
+  copy_paste_prob: 0.0 # paste rare objects (rgb + depth + label) from other images into a sample; 0 = off
+  copy_paste_max_objects: 3 # 1..N objects per pasted sample
+  rare_crop_prob: 0.0 # place the random crop around a rare-class pixel; 0 = off
+  repeat_factor_threshold: 0.0 # oversample images with classes seen in < this share of images (LVIS); 0 = off
 
 hardware:
   device: cuda # cuda | mps (Apple) | cpu; fails if the device is not available
@@ -54,3 +60,4 @@ logging: # Weights & Biases
   mode: online # online | offline (sync later with `wandb sync`) | disabled
   num_sample_images: 4 # fixed validation images (RGB, depth, label, prediction) in the samples/ section
   tags: [] # extra tags, e.g. [rgbd, baseline]
+  log_model: true # upload best.pt, last.pt and config.yaml as a W&B model artifact (sweep trials turn it off)

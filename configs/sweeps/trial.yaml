@@ -1,0 +1,11 @@
+# Base config of one sweep trial (configs/sweeps/segmentation.yaml merges the sampled values into it).
+# Shorter than the 100-epoch baseline so a sweep fits in a reasonable time; the poly LR schedule spans these
+# 40 epochs, so every trial still ends with a fully decayed LR. Retrain the best trial's config for 100 epochs.
+base: ../segmentation.yaml
+experiment:
+  name: sweep # replaced by the W&B run id; checkpoints go to checkpoints/sweeps/<sweep_id>/<run_id>/
+training:
+  epochs: 40
+logging:
+  log_model: false # keep checkpoints local only: no 200 MB model artifact upload per trial
+  tags: [sweep]

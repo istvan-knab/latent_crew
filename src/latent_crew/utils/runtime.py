@@ -36,7 +36,13 @@ def autocast(device: torch.device, enabled: bool) -> contextlib.AbstractContextM
 
 
 def init_wandb(config: SegmentationConfig, run_name: str, extra_tags: List[str] = ()) -> "wandb.Run":
-    """Starts a W&B run with the full config; local W&B files go to outputs/wandb (gitignored, mounted in Docker)."""
+    """Starts a W&B run with the full config; local W&B files go to outputs/wandb (gitignored, mounted in Docker).
+
+    Inside a sweep trial the run already exists (started by `latent_crew.training.sweep` with the full config),
+    so that run is returned instead of starting a second one.
+    """
+    if wandb.run is not None:
+        return wandb.run
     log = config.logging
     out = Path("outputs")
     out.mkdir(parents=True, exist_ok=True)

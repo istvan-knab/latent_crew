@@ -1,0 +1,11 @@
+# Experiment: rare-class-aware sampling. Images with rare classes are drawn more often (repeat-factor sampling,
+# same number of draws per epoch) and the random crop is placed around a rare-class pixel half of the time,
+# so small rare objects are not cropped away.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_raresampling
+augmentation:
+  rare_crop_prob: 0.5
+  repeat_factor_threshold: 0.1
+logging:
+  tags: [rare_sampling]

@@ -1,0 +1,10 @@
+# Experiment: early stopping on val mIoU (patience 20) as a regulariser against overfitting.
+# Monitors val mIoU, not val loss: in the baseline val loss bottoms out around epoch 20-25 while val mIoU keeps rising.
+# The poly LR schedule still spans training.epochs, so a stopped run ends before the LR has decayed to 0.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_early_stopping
+training:
+  early_stopping_patience: 20
+logging:
+  tags: [early_stopping]

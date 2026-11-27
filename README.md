@@ -172,10 +172,39 @@ Early stopping: `training.early_stopping_patience: 10` (in `configs/segmentation
 | `configs/experiments/class_weighting.yaml` | median-frequency class weights in the CE loss |
 | `configs/experiments/dice_ce.yaml` | `training.loss: dice_ce` (cross-entropy + soft Dice) |
 | `configs/experiments/strong_aug.yaml` | scale 0.5–2.5, colour jitter 0.4 |
+| `configs/experiments/copy_paste.yaml` | rare-class copy-paste, `copy_paste_prob: 0.5` |
+| `configs/experiments/rare_sampling.yaml` | rare-class crop (`rare_crop_prob: 0.5`) + repeat-factor sampling (`repeat_factor_threshold: 0.1`) |
+| `configs/experiments/rare_class_aug.yaml` | both of the above |
+
+**Rare-class augmentation** (`src/latent_crew/data/rare_classes.py`, all switches under `augmentation:`, off in the baseline). Weak classes such as bag, paper or box are small objects, so instead of flipping the few images that show them again, they are shown in new contexts. The rare classes are the `rare_classes` (12) classes with the smallest pixel share in the train split, measured once and cached as `class_pixels_train.npz` in the dataset root.
+- `copy_paste_prob`: chance per training sample to paste 1..`copy_paste_max_objects` rare objects (one connected component each, cut from another training image) with their RGB, depth and label. The object is moved to the scene depth at the paste position: its depth values and its size are scaled together (pinhole camera), and it occludes what was there.
+- `rare_crop_prob`: chance to place the random crop around a rare-class pixel (also hits pasted objects), so the crop does not cut small objects away.
+- `repeat_factor_threshold`: repeat-factor sampling (LVIS); images containing a class that appears in fewer than this share of the images are drawn up to sqrt(threshold / frequency) times more often. An epoch still has as many draws as there are images, so the LR schedule stays comparable.
+All keys are flat numbers, so they can be swept like the other augmentation keys.
 
 Checkpoints go to `checkpoints/<experiment.name>/` (`best.pt` by validation mIoU, `last.pt`, `config.yaml`). Validation uses the `val` split of `index.jsonl` (SUN RGB-D: 528 images, a fixed seeded 10 % of the official train set, set by `[split] val_ratio` in `data/config.toml`); training uses the remaining 4757 `train` images. The test split is only used by the test script.
 
 After successful training, the run logs a W&B artifact of type `model`, named `segmentation-<run_id>`, containing `best.pt`, `last.pt` and `config.yaml`. Find it in the run's **Artifacts** tab; its metadata includes the model specification, best validation mIoU and best epoch. Both checkpoints include the weights, model specification, class names and configuration needed to rebuild the network. With `logging.mode: online` the artifact is uploaded; `offline` stages it for later `wandb sync`, and `disabled` keeps only the local checkpoints. Existing checkpoints are not uploaded retroactively.
+
+**Hyperparameter sweep.** Hyperparameter optimisation runs as one [W&B sweep](https://docs.wandb.ai/guides/sweeps), so all trials sit together under the sweep (table, parallel coordinates, parameter importance) instead of piling up as separate runs. `configs/sweeps/segmentation.yaml` defines it: Bayesian search maximising val mIoU (`metrics/mIoU`, best epoch of a trial), Hyperband early termination at epochs 10 and 30, and the searched ranges (`training.lr`, `encoder_lr_mult`, `weight_decay`, `batch_size`, `loss`, `class_weighting`, `label_smoothing`, `augmentation.color_jitter`, `scale_range`). Sweep parameters are nested like the config sections; every trial trains `configs/sweeps/trial.yaml` (baseline with 40 epochs, patience 10, no model artifact upload) with the sampled values merged in, and writes its checkpoints to `checkpoints/sweeps/<sweep_id>/<run_id>/`.
+
+```bash
+# Create the sweep, run 25 trials, then retrain the best trial for the full 100 epochs (prints the sweep path)
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml run --rm latent-crew \
+  scripts/sweep_segmentation.sh configs/sweeps/segmentation.yaml 25
+# Continue the same sweep later: pass the sweep path instead of the YAML
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml run --rm latent-crew \
+  scripts/sweep_segmentation.sh <entity>/latent-crew/<sweep_id> 10
+```
+
+Run it in `tmux` (or add `-d` to the compose command) so it survives a closed SSH session. 20–30 trials are a sensible budget for these nine parameters; Hyperband stops the clearly weak ones early. Because trials are shorter than the baseline and may be stopped early, the script chains the final run: after the last trial it writes the best trial's values to `configs/experiments/sweep_best.yaml` (on top of the 100-epoch baseline) and trains it like any other experiment, with its own W&B run and model artifact. `--no-final` (first argument) skips this, e.g. for an extra agent running in parallel on the same sweep, so only one agent starts the final training. Both steps also work by hand:
+
+```bash
+docker compose -f docker/docker-compose.yml run --rm latent-crew \
+  python -m latent_crew.training.sweep best <entity>/latent-crew/<sweep_id>
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml run --rm latent-crew \
+  scripts/train_segmentation.sh configs/experiments/sweep_best.yaml
+```
 
 Docker keeps W&B artifact staging and its cache under the mounted `outputs/` directory, so they survive container removal. Sync offline Docker runs from the same Compose environment so their stored file paths resolve.
 

@@ -1,0 +1,11 @@
+# Experiment: copy-paste and rare-class-aware sampling together (copy_paste.yaml + rare_sampling.yaml).
+# The rare-class crop also targets the pasted objects, so they are seen at many scales and positions.
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_rareaug
+augmentation:
+  copy_paste_prob: 0.5
+  rare_crop_prob: 0.5
+  repeat_factor_threshold: 0.1
+logging:
+  tags: [rare_class_aug]

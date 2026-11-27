@@ -1,0 +1,10 @@
+# Experiment: rare-class copy-paste. Objects of the rare classes (smallest pixel share in the train split) are cut
+# from other training images and pasted into the sample with their RGB, depth and label, so they appear in new
+# scenes and next to new neighbours instead of repeating the same few images (latent_crew.data.rare_classes).
+base: ../segmentation.yaml
+experiment:
+  name: sunrgbd_rgbd_resnet50_deeplabv3plus_copypaste
+augmentation:
+  copy_paste_prob: 0.5
+logging:
+  tags: [copy_paste]

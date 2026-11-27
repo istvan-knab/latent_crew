@@ -89,6 +89,12 @@ class AugmentationConfig:
     scale_range: List[float]
     hflip: bool
     color_jitter: float
+    # Rare-class augmentation (latent_crew.data.rare_classes); all off by default
+    rare_classes: int = 12  # the N classes with the smallest pixel share in the train split count as rare
+    copy_paste_prob: float = 0.0  # chance per sample to paste rare objects from other images; 0 = off
+    copy_paste_max_objects: int = 3  # 1..N objects per pasted sample
+    rare_crop_prob: float = 0.0  # chance to place the crop around a rare-class pixel; 0 = off
+    repeat_factor_threshold: float = 0.0  # repeat-factor sampling: oversample classes in < this share of images; 0 = off
 
 
 @dataclass
@@ -108,6 +114,7 @@ class LoggingConfig:
     mode: str
     num_sample_images: int
     tags: List[str] = field(default_factory=list)
+    log_model: bool = True  # upload best.pt / last.pt / config.yaml as a W&B `model` artifact at the end
 
 
 @dataclass
@@ -201,6 +208,15 @@ class SegmentationConfig:
             raise ValueError("training.l1_lambda must be >= 0 (0 = off)")
         if not 0.0 <= t.encoder_lr_mult <= 1.0:
             raise ValueError("training.encoder_lr_mult must be in [0, 1]")
+        a = self.augmentation
+        if not 1 <= a.rare_classes <= d.num_classes:
+            raise ValueError(f"augmentation.rare_classes must be in [1, {d.num_classes}]")
+        if not (0.0 <= a.copy_paste_prob <= 1.0 and 0.0 <= a.rare_crop_prob <= 1.0):
+            raise ValueError("augmentation.copy_paste_prob and rare_crop_prob must be in [0, 1] (0 = off)")
+        if a.copy_paste_max_objects < 1:
+            raise ValueError("augmentation.copy_paste_max_objects must be >= 1")
+        if not 0.0 <= a.repeat_factor_threshold <= 1.0:
+            raise ValueError("augmentation.repeat_factor_threshold must be in [0, 1] (0 = off)")
         if len(self.augmentation.crop_size) != 2 or any(s % 32 for s in self.augmentation.crop_size):
             raise ValueError("augmentation.crop_size must be [height, width], both multiples of 32")
         if self.hardware.device not in ("cuda", "mps", "cpu"):
